@@ -46,8 +46,9 @@ class PipelineCache extends EventEmitter {
    * Get or create compute pipeline for operation
    */
   async get(operation, options = {}) {
+
     const key = this._generateKey(operation, options);
-    
+
     // Check if already compiled or in progress
     if (this.pipelines.has(key)) {
       this._updateAccess(key);
@@ -55,7 +56,7 @@ class PipelineCache extends EventEmitter {
       this.emit('cache:hit', { operation, key });
       return this.pipelines.get(key);
     }
-    
+
     // Check if compilation is in progress
     if (this.compilationQueue.has(key)) {
       this.emit('cache:wait', { operation, key });
@@ -65,10 +66,10 @@ class PipelineCache extends EventEmitter {
     // Start compilation
     this.stats.misses++;
     this.emit('cache:miss', { operation, key });
-    
+
     const compilationPromise = this._compilePipeline(operation, options, key);
     this.compilationQueue.set(key, compilationPromise);
-    
+
     try {
       const pipeline = await compilationPromise;
       this.compilationQueue.delete(key);
@@ -170,18 +171,18 @@ class PipelineCache extends EventEmitter {
    * Generate optimized shader for operation
    */
   generateShader(operation, options = {}) {
-    const template = this.shaderTemplates[operation];
+    const template = this.shaderTemplates.get(operation);
     if (!template) {
       throw new Error(`No shader template found for operation: ${operation}`);
     }
-    
+
     const shaderOptions = {
       workgroupSize: options.workgroupSize || [8, 8, 1],
       dataType: options.dataType || 'f32',
       optimization: this.config.shaderOptimization,
       ...options
     };
-    
+
     return template(shaderOptions);
   }
 
@@ -231,22 +232,23 @@ class PipelineCache extends EventEmitter {
   // Private methods
   async _compilePipeline(operation, options, key) {
     const startTime = performance.now();
-    
+
     try {
+
       // Generate shader source
       const shaderSource = this.generateShader(operation, options);
-      
+
       // Create shader module
       const shaderModule = await this.createShaderModule(shaderSource);
-      
+
       // Create bind group layout
       const bindGroupLayout = this.getBindGroupLayout(operation, options);
-      
+
       // Create pipeline layout
       const pipelineLayout = this.device.createPipelineLayout({
         bindGroupLayouts: [bindGroupLayout]
       });
-      
+
       // Create compute pipeline
       const pipeline = await this.device.createComputePipelineAsync({
         layout: pipelineLayout,

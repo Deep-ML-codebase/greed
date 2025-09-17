@@ -13,15 +13,28 @@ export class WebGPUTensor {
     this.grad = null;
     this.grad_fn = null;
     
-    // Shape and data handling
     if (Array.isArray(data) || ArrayBuffer.isView(data)) {
       this.data = this._processInputData(data);
       this.shape = options.shape || this._inferShape(data);
     } else if (data instanceof ArrayBuffer) {
       this.data = new Float32Array(data);
       this.shape = options.shape || [this.data.length];
+    } else if (data && typeof data === 'object' && data.constructor?.name === 'PyProxy' && typeof data.length !== 'undefined') {
+      // Handle Pyodide PyProxy objects (Python lists converted to JavaScript)
+      const jsArray = Array.from(data); // Convert PyProxy to native JS array
+      this.data = this._processInputData(jsArray);
+      this.shape = options.shape || this._inferShape(jsArray);
     } else {
-      throw new Error('Invalid tensor data type');
+      const debugInfo = {
+        type: typeof data,
+        constructor: data?.constructor?.name,
+        isArray: Array.isArray(data),
+        isArrayBufferView: ArrayBuffer.isView(data),
+        isArrayBuffer: data instanceof ArrayBuffer,
+        hasLength: typeof data?.length !== 'undefined',
+        stringValue: String(data).substring(0, 100)
+      };
+      throw new Error(`Invalid tensor data type: ${JSON.stringify(debugInfo)}`);
     }
     
     // Derived properties
@@ -52,8 +65,23 @@ export class WebGPUTensor {
     if (!this._engine) {
       throw new Error('WebGPU compute engine not available');
     }
-    
-    const tensors = other ? [this.data, other.data || other] : [this.data];
+
+    // Safely extract tensor data, handling potential proxy destruction
+    let otherData = null;
+    if (other) {
+      try {
+        otherData = other.data || other;
+        // If it's a proxy that might be destroyed, copy it immediately
+        if (otherData && typeof otherData === 'object' && otherData.constructor?.name === 'PyProxy') {
+          otherData = Array.from(otherData);
+          otherData = new Float32Array(otherData);
+        }
+      } catch (error) {
+        throw new Error(`Failed to access tensor data: ${error.message}. This may be due to Pyodide proxy destruction.`);
+      }
+    }
+
+    const tensors = other ? [this.data, otherData] : [this.data];
     
     try {
       const result = await this._engine.execute(operation, tensors, {
@@ -62,23 +90,31 @@ export class WebGPUTensor {
         dtype: this.dtype,
         ...options
       });
-      
+
       const resultShape = this._calculateResultShape(operation, other, options);
-      return new WebGPUTensor(result, {
+
+      const resultTensor = new WebGPUTensor(result, {
         shape: resultShape,
         device: this.device,
         dtype: this.dtype,
         computeEngine: this._engine,
         requires_grad: this.requires_grad || (other?.requires_grad)
       });
+
+      return resultTensor;
     } catch (error) {
-      logger.warn(`WebGPU operation ${operation} failed, falling back to CPU:`, {
+      const fallbackInfo = {
         operation,
         error: error.message,
         tensorShape: this.shape,
         otherShape: other?.shape,
-        fallbackReason: 'gpu-operation-failed'
-      });
+        fallbackReason: 'gpu-operation-failed',
+        engineAvailable: !!this._engine,
+        engineInitialized: this._engine?.isInitialized
+      };
+
+      logger.warn(`WebGPU operation ${operation} failed, falling back to CPU:`, fallbackInfo);
+
       return this._executeCPUFallback(operation, other, options);
     }
   }
@@ -391,6 +427,16 @@ export class WebGPUTensor {
   
   // ===== PRIVATE METHODS =====
   
+  _isDebugEnabled() {
+    // Check for WebGPU debug flag in global scope
+    try {
+      return (typeof window !== 'undefined' && window.greedDebugWebGPU) ||
+             (typeof global !== 'undefined' && global.greedDebugWebGPU);
+    } catch {
+      return false;
+    }
+  }
+  
   _processInputData(data) {
     if (Array.isArray(data)) {
       return new Float32Array(this._flattenArray(data));
@@ -501,6 +547,36 @@ export class WebGPUTensor {
       relu: (a) => a.map(val => Math.max(0, val)),
       sigmoid: (a) => a.map(val => 1 / (1 + Math.exp(-val))),
       tanh: (a) => a.map(val => Math.tanh(val)),
+      matmul: (a, b, options) => {
+        // CPU matrix multiplication fallback
+        const aShape = options.shape || [Math.sqrt(a.length), Math.sqrt(a.length)];
+        const bShape = options.otherShape || [Math.sqrt(b.length), Math.sqrt(b.length)];
+
+        if (aShape.length !== 2 || bShape.length !== 2) {
+          throw new Error('CPU matmul fallback requires 2D matrices');
+        }
+
+        const [M, K] = aShape;
+        const [K2, N] = bShape;
+
+        if (K !== K2) {
+          throw new Error(`Cannot multiply matrices of shapes [${M},${K}] and [${K2},${N}]`);
+        }
+
+        const result = new Array(M * N);
+
+        for (let i = 0; i < M; i++) {
+          for (let j = 0; j < N; j++) {
+            let sum = 0;
+            for (let k = 0; k < K; k++) {
+              sum += a[i * K + k] * b[k * N + j];
+            }
+            result[i * N + j] = sum;
+          }
+        }
+
+        return result;
+      },
       std: (a, options = {}) => {
         const mean = a.reduce((sum, val) => sum + val, 0) / a.length;
         const variance = a.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / (options.unbiased ? a.length - 1 : a.length);

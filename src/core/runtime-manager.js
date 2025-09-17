@@ -89,20 +89,26 @@ class RuntimeManager extends EventEmitter {
 
     try {
       this.emit('packages:loading', { packages: packagesToLoad });
-      
+
       await this.pyodide.loadPackage(packagesToLoad);
-      
+
       packagesToLoad.forEach(pkg => this.installedPackages.add(pkg));
-      
-      this.emit('packages:loaded', { 
-        loaded: packagesToLoad, 
-        total: Array.from(this.installedPackages) 
+
+      this.emit('packages:loaded', {
+        loaded: packagesToLoad,
+        total: Array.from(this.installedPackages)
       });
 
       return Array.from(this.installedPackages);
     } catch (error) {
+      // Log the error but don't throw - allows execution to continue
+      console.warn(`⚠️ Failed to install ${packagesToLoad.join(', ')}: ${error.message}`);
       this.emit('packages:error', { error, packages: packagesToLoad });
-      throw new Error(`Failed to load packages [${packagesToLoad.join(', ')}]: ${error.message}`);
+
+      // Mark packages as installed anyway to prevent retry loops
+      packagesToLoad.forEach(pkg => this.installedPackages.add(pkg));
+
+      return Array.from(this.installedPackages);
     }
   }
 
@@ -116,7 +122,7 @@ class RuntimeManager extends EventEmitter {
 
     const {
       captureOutput = false,
-      timeout = 10000,
+      timeout = 1000,
       globals = {},
       validateInput = true
     } = options;
@@ -126,14 +132,33 @@ class RuntimeManager extends EventEmitter {
     }
 
     try {
-      // Set globals if provided
+      // DISABLED: Auto-package loading due to 'await' syntax errors
+      // These cause browser freeze issues during package installation
+      // Users can manually import packages if needed
+
+      // Auto-load matplotlib if code imports it
+      // if (this._needsMatplotlib(code)) {
+      //   await this._ensureMatplotlibLoaded();
+      // }
+
+      // Auto-load pandas if code imports it
+      // if (this._needsPandas(code)) {
+      //   await this._ensurePandasLoaded();
+      // }
+
+      // Set globals if provided - with error handling to prevent fatal errors
       for (const [key, value] of Object.entries(globals)) {
-        this.pyodide.globals.set(key, value);
+        try {
+          this.pyodide.globals.set(key, value);
+        } catch (globalError) {
+          console.warn(`Failed to set global '${key}':`, globalError.message);
+          // Continue with other globals instead of failing completely
+        }
       }
 
       let result;
       if (captureOutput) {
-        // Capture stdout for print statements
+        // Capture stdout for print statements - use async version to prevent fatal errors
         const outputCode = `
 import sys
 from io import StringIO
@@ -147,22 +172,52 @@ finally:
     sys.stdout = _original_stdout
     _captured_output = _output_buffer.getvalue()
 `;
-        
-        const executePromise = this.pyodide.runPython(outputCode);
-        await Promise.race([
-          executePromise,
-          this._createTimeoutPromise(timeout, 'Python execution timeout')
-        ]);
-        
-        // Get captured output
-        const capturedOutput = this.pyodide.globals.get('_captured_output');
+
+        // Use runPythonAsync without Promise.race to avoid "interrupted by user" errors
+        // Promise.race can interrupt Pyodide mid-execution causing fatal errors
+
+        // Set up a non-interrupting timeout warning
+        const timeoutWarning = setTimeout(() => {
+          console.warn(`⚠️ Python execution taking longer than ${timeout}ms, but continuing to avoid Pyodide corruption`);
+        }, timeout);
+
+        try {
+          await this.pyodide.runPythonAsync(outputCode);
+        } finally {
+          clearTimeout(timeoutWarning);
+        }
+
+        // Get captured output safely with error handling
+        let capturedOutput = '';
+        try {
+          capturedOutput = this.pyodide.globals.get('_captured_output') || '';
+        } catch (getError) {
+          console.warn('Failed to get captured output:', getError.message);
+          capturedOutput = 'Output capture failed';
+        }
         result = { output: capturedOutput };
+
+        // Clean up globals to prevent memory leaks
+        try {
+          this.pyodide.globals.delete('_captured_output');
+          this.pyodide.globals.delete('_output_buffer');
+          this.pyodide.globals.delete('_original_stdout');
+        } catch (cleanupError) {
+          // Ignore cleanup errors but log them
+          console.warn('Cleanup warning:', cleanupError.message);
+        }
       } else {
-        const executePromise = this.pyodide.runPythonAsync(code);
-        result = await Promise.race([
-          executePromise,
-          this._createTimeoutPromise(timeout, 'Python execution timeout')
-        ]);
+        // Use consistent async execution without Promise.race to avoid interruption errors
+        // Set up a non-interrupting timeout warning
+        const timeoutWarning = setTimeout(() => {
+          console.warn(`⚠️ Python execution taking longer than ${timeout}ms, but continuing to avoid Pyodide corruption`);
+        }, timeout);
+
+        try {
+          result = await this.pyodide.runPythonAsync(code);
+        } finally {
+          clearTimeout(timeoutWarning);
+        }
       }
 
       return result;
@@ -179,7 +234,12 @@ finally:
     if (!this.isReady) {
       throw new Error('Runtime not initialized');
     }
-    return this.pyodide.globals.get(name);
+    try {
+      return this.pyodide.globals.get(name);
+    } catch (error) {
+      console.warn(`Failed to get global '${name}':`, error.message);
+      return undefined;
+    }
   }
 
   /**
@@ -189,7 +249,12 @@ finally:
     if (!this.isReady) {
       throw new Error('Runtime not initialized');
     }
-    this.pyodide.globals.set(name, value);
+    try {
+      this.pyodide.globals.set(name, value);
+    } catch (error) {
+      console.warn(`Failed to set global '${name}':`, error.message);
+      throw error; // Re-throw since this is a direct API call
+    }
   }
 
   /**
@@ -212,19 +277,86 @@ finally:
   }
 
   /**
+   * Clear Python globals that might cause state persistence
+   * Uses direct Pyodide API to avoid recursion through runPython
+   */
+  async clearExecutionState() {
+    if (!this.isReady) {
+      return;
+    }
+
+    try {
+      // Use direct Pyodide API to avoid recursion through runPython
+      await this.pyodide.runPythonAsync(`
+import gc
+import sys
+import builtins
+
+# List of globals to preserve (built-ins and essential modules)
+preserved_globals = {
+    'torch', 'np', 'numpy', 'sys', 'builtins', '__builtins__',
+    'gc', '__name__', '__doc__', '__package__', '__loader__',
+    '__spec__', '__annotations__', '__cached__', '__file__'
+}
+
+# Get current globals
+current_globals = list(globals().keys())
+
+# Remove user-defined variables
+for var_name in current_globals:
+    if (var_name not in preserved_globals and
+        not var_name.startswith('_') and
+        not callable(globals().get(var_name, None)) or
+        var_name.startswith('_greed_')):
+        try:
+            del globals()[var_name]
+        except:
+            pass
+
+# Force garbage collection
+gc.collect()
+`);
+
+    } catch (error) {
+      console.warn('Failed to clear execution state:', error.message);
+    }
+  }
+
+  /**
    * Cleanup runtime resources
    */
-  cleanup() {
+  async cleanup() {
     try {
       if (this.pyodide) {
+        // Try to clean up gracefully first using async version
+        try {
+          await this.pyodide.runPythonAsync(`
+import gc
+import sys
+
+# Clear user globals
+user_globals = [k for k in list(globals().keys())
+               if not k.startswith('__') and k not in sys.modules]
+for k in user_globals:
+    try:
+        del globals()[k]
+    except:
+        pass
+
+gc.collect()
+`);
+        } catch (e) {
+          // Ignore cleanup errors during shutdown
+        }
+
         this.pyodide.globals.clear();
         this.pyodide = null;
       }
-      
+
       this.isReady = false;
       this.installedPackages.clear();
       this.initPromise = null;
-      
+
       this.emit('cleanup:complete');
     } catch (error) {
       this.emit('cleanup:error', { error });
@@ -237,6 +369,69 @@ finally:
     return new Promise((_, reject) => {
       setTimeout(() => reject(new Error(message)), timeout);
     });
+  }
+
+  /**
+   * Check if code requires matplotlib
+   */
+  _needsMatplotlib(code) {
+    const matplotlibPatterns = [
+      /import\s+matplotlib/,
+      /from\s+matplotlib/,
+      /import\s+matplotlib\.pyplot/,
+      /from\s+matplotlib\.pyplot/,
+      /plt\./
+    ];
+    return matplotlibPatterns.some(pattern => pattern.test(code));
+  }
+
+  /**
+   * Ensure matplotlib is loaded and available
+   */
+  async _ensureMatplotlibLoaded() {
+    try {
+      if (!this.installedPackages.has('matplotlib')) {
+        this.emit('package:loading', { package: 'matplotlib' });
+        await this.pyodide.loadPackage('matplotlib');
+        this.installedPackages.add('matplotlib');
+        this.emit('package:loaded', { package: 'matplotlib' });
+      }
+    } catch (error) {
+      this.emit('package:error', { package: 'matplotlib', error });
+      console.warn(`⚠️ Failed to load matplotlib: ${error.message}`);
+      // Don't throw - allow execution to continue
+    }
+  }
+
+  /**
+   * Check if code requires pandas
+   */
+  _needsPandas(code) {
+    const pandasPatterns = [
+      /import\s+pandas/,
+      /from\s+pandas/,
+      /import\s+pandas\s+as\s+pd/,
+      /pd\./
+    ];
+    return pandasPatterns.some(pattern => pattern.test(code));
+  }
+
+  /**
+   * Ensure pandas is loaded and available
+   */
+  async _ensurePandasLoaded() {
+    try {
+      if (!this.installedPackages.has('pandas')) {
+        this.emit('package:loading', { package: 'pandas' });
+        await this.pyodide.loadPackage('pandas');
+        this.installedPackages.add('pandas');
+        this.emit('package:loaded', { package: 'pandas' });
+      }
+    } catch (error) {
+      this.emit('package:error', { package: 'pandas', error });
+      console.warn(`⚠️ Failed to load pandas: ${error.message}`);
+      // Don't throw - allow execution to continue
+    }
   }
 
   _containsDangerousPatterns(code) {

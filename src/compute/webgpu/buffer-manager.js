@@ -129,16 +129,27 @@ class BufferManager extends EventEmitter {
   }
 
   /**
-   * Create a mapped buffer for data transfer
+   * Create a mapped buffer for data transfer with proper staging
    */
-  async createMappedBuffer(data, usage = GPUBufferUsage.COPY_SRC) {
+  async createMappedBuffer(data, targetUsage = GPUBufferUsage.STORAGE) {
     const size = this._calculateBufferSize(data);
-    const buffer = this.allocate(size, usage | GPUBufferUsage.MAP_WRITE);
-    
+
+    // Create staging buffer with MAP_WRITE and COPY_SRC (valid combination)
+    const stagingBuffer = this.device.createBuffer({
+      size,
+      usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC
+    });
+
     try {
-      await buffer.mapAsync(GPUMapMode.WRITE);
-      const mappedRange = buffer.getMappedRange();
-      
+      // Map with timeout protection
+      const mapPromise = stagingBuffer.mapAsync(GPUMapMode.WRITE);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Staging buffer mapping timeout')), 3000);
+      });
+      await Promise.race([mapPromise, timeoutPromise]);
+
+      const mappedRange = stagingBuffer.getMappedRange();
+
       if (data instanceof ArrayBuffer) {
         new Uint8Array(mappedRange).set(new Uint8Array(data));
       } else if (ArrayBuffer.isView(data)) {
@@ -146,13 +157,77 @@ class BufferManager extends EventEmitter {
       } else {
         throw new Error('Unsupported data type for mapped buffer');
       }
-      
-      buffer.unmap();
-      this.emit('buffer:mapped', { buffer, size, dataType: data.constructor.name });
-      
-      return buffer;
+
+      stagingBuffer.unmap();
+
+      // Create target buffer with requested usage
+      const targetBuffer = this.allocate(size, targetUsage | GPUBufferUsage.COPY_DST);
+
+      // Copy from staging to target buffer
+      const encoder = this.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(stagingBuffer, 0, targetBuffer, 0, size);
+      const commands = encoder.finish();
+      this.device.queue.submit([commands]);
+
+      // Wait for copy completion with timeout
+      await this._waitForGPUCompletion(2000);
+
+      // Clean up staging buffer
+      stagingBuffer.destroy();
+
+      this.emit('buffer:mapped', { buffer: targetBuffer, size, dataType: data.constructor.name });
+
+      return targetBuffer;
     } catch (error) {
-      this.release(buffer, { forceDestroy: true });
+      stagingBuffer.destroy();
+      throw error;
+    }
+  }
+
+  /**
+   * Read data from a buffer with proper staging
+   */
+  async readBuffer(buffer, size = null) {
+    const metadata = this.activeBuffers.get(buffer);
+    if (!metadata) {
+      throw new Error('Buffer not found in active buffers');
+    }
+
+    const actualSize = size || metadata.size;
+
+    // Create staging buffer for reading with MAP_READ and COPY_DST (valid combination)
+    const stagingBuffer = this.device.createBuffer({
+      size: actualSize,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+    });
+
+    try {
+      // Copy from source to staging buffer
+      const encoder = this.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(buffer, 0, stagingBuffer, 0, actualSize);
+      const commands = encoder.finish();
+      this.device.queue.submit([commands]);
+
+      // Wait for operations to complete with timeout
+      await this._waitForGPUCompletion(3000);
+
+      // Map and read data with timeout protection
+      const mapPromise = stagingBuffer.mapAsync(GPUMapMode.READ);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Read buffer mapping timeout')), 2000);
+      });
+      await Promise.race([mapPromise, timeoutPromise]);
+      const mappedRange = stagingBuffer.getMappedRange();
+      const data = new Float32Array(mappedRange.slice());
+
+      stagingBuffer.unmap();
+      stagingBuffer.destroy();
+
+      this.emit('buffer:read', { buffer, size: actualSize, dataSize: data.length });
+
+      return data;
+    } catch (error) {
+      stagingBuffer.destroy();
       throw error;
     }
   }
@@ -290,14 +365,14 @@ class BufferManager extends EventEmitter {
    */
   async cleanup() {
     this.emit('cleanup:start');
-    
+
     try {
       // Destroy all active buffers
       for (const [buffer, metadata] of this.activeBuffers.entries()) {
         this._destroyBuffer(buffer, metadata);
       }
       this.activeBuffers.clear();
-      
+
       // Destroy all pooled buffers
       for (const pool of this.pools.values()) {
         for (const buffer of pool) {
@@ -305,17 +380,40 @@ class BufferManager extends EventEmitter {
         }
       }
       this.pools.clear();
-      
+
       // Reset statistics
       this.totalMemoryUsage = 0;
       this.stats.currentActive = 0;
       this.stats.totalPooled = 0;
-      
+
       this.emit('cleanup:complete');
     } catch (error) {
       this.emit('cleanup:error', { error });
       throw error;
     }
+  }
+
+  /**
+   * Wait for GPU completion with timeout protection
+   */
+  async _waitForGPUCompletion(timeoutMs = 3000) {
+    return new Promise((resolve, reject) => {
+      // Set up timeout
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Buffer operation timeout (${timeoutMs / 1000}s)`));
+      }, timeoutMs);
+
+      // Wait for GPU work to complete
+      this.device.queue.onSubmittedWorkDone()
+        .then(() => {
+          clearTimeout(timeoutId);
+          resolve();
+        })
+        .catch((error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        });
+    });
   }
 
   // Private methods
@@ -378,7 +476,7 @@ class BufferManager extends EventEmitter {
     return memoryUsageRatio > this.config.gcThreshold;
   }
 
-  async _runGC() {
+  async _runGCAsync() {
     try {
       await this.gc({ aggressive: false });
     } catch (error) {
@@ -439,14 +537,14 @@ class BufferManager extends EventEmitter {
       });
       
       // Trigger regular GC asynchronously
-      setTimeout(() => this._runGC(), 0);
+      setTimeout(() => this._runGCSync(), 0);
     }
   }
 
   /**
    * Internal GC method (less aggressive than forceGC)
    */
-  _runGC() {
+  _runGCSync() {
     const pooledBuffers = this._getTotalPooledBuffers();
     if (pooledBuffers > 0) {
       // Clean oldest 20% of pooled buffers
@@ -476,6 +574,74 @@ class BufferManager extends EventEmitter {
       
       this.emit('gc:automatic', { destroyed, remaining: this._getTotalPooledBuffers() });
     }
+  }
+
+  /**
+   * Find reusable buffer from pool (optimization for compute engine)
+   */
+  findReusableBuffer(size, usage) {
+    if (!this.config.enablePooling) {
+      return null;
+    }
+    
+    const poolKey = this._getPoolKey(size, usage);
+    const pool = this.pools.get(poolKey);
+    
+    if (pool && pool.length > 0) {
+      const buffer = pool.pop();
+      this.stats.poolHits++;
+      this.emit('buffer:reused', { size, usage, poolKey });
+      
+      // Track as active buffer
+      const metadata = {
+        size,
+        usage,
+        poolKey,
+        allocatedAt: performance.now(),
+        lastAccessed: performance.now(),
+        reused: true
+      };
+      
+      this.activeBuffers.set(buffer, metadata);
+      this.totalMemoryUsage += size;
+      this.stats.currentActive = this.activeBuffers.size;
+      
+      return buffer;
+    }
+    
+    return null;
+  }
+
+  /**
+   * Return buffer to pool (optimization for compute engine)
+   */
+  returnToPool(buffer) {
+    const metadata = this.activeBuffers.get(buffer);
+    if (!metadata) {
+      return false;
+    }
+    
+    // Remove from active tracking
+    this.activeBuffers.delete(buffer);
+    this.totalMemoryUsage -= metadata.size;
+    this.stats.releases++;
+    this.stats.currentActive = this.activeBuffers.size;
+    
+    // Add to pool
+    if (this._addToPool(buffer, metadata)) {
+      this.emit('buffer:pooled', { buffer, poolKey: metadata.poolKey });
+      return true;
+    } else {
+      this._destroyBuffer(buffer, metadata);
+      return false;
+    }
+  }
+
+  /**
+   * Force garbage collection with different aggressiveness levels
+   */
+  async forceGC(options = {}) {
+    return this.gc({ aggressive: true, ...options });
   }
 }
 

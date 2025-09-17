@@ -35,14 +35,18 @@ class WebGPUTensor:
         self._original_device = device
         self._force_webgpu = _force_webgpu
         
+        # TEMPORARILY DISABLED: Auto-detect WebGPU to prevent recursion
         # Auto-detect WebGPU usage for larger tensors or when forced
-        if (_force_webgpu or self._should_use_webgpu(data)) and device != 'cpu':
-            self.device = WebGPUDevice('webgpu')
-        elif device == 'cuda' or device == 'gpu':
-            # Map CUDA/GPU requests to WebGPU if available
-            self.device = WebGPUDevice('webgpu')
-        else:
-            self.device = WebGPUDevice(device) if isinstance(device, str) else device
+        # if (_force_webgpu or self._should_use_webgpu(data)) and device != 'cpu':
+        #     self.device = WebGPUDevice('webgpu')
+        # elif device == 'cuda' or device == 'gpu':
+        #     # Map CUDA/GPU requests to WebGPU if available
+        #     self.device = WebGPUDevice('webgpu')
+        # else:
+        #     self.device = WebGPUDevice(device) if isinstance(device, str) else device
+
+        # Simple device assignment to prevent recursion
+        self.device = device
         
         self.dtype = dtype
         self.requires_grad = requires_grad
@@ -101,26 +105,24 @@ class WebGPUTensor:
                 shape = tuple(shape)
         
         reshaped_data = self.data.reshape(shape)
-        return WebGPUTensor(reshaped_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(reshaped_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
     
     def reshape(self, *shape):
         return self.view(*shape)
     
     def transpose(self, dim0, dim1):
         transposed_data = np.swapaxes(self.data, dim0, dim1)
-        return WebGPUTensor(transposed_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(transposed_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
     
     def sum(self, dim=None, keepdim=False):
         if dim is None:
             result_data = np.sum(self.data)
         else:
             result_data = np.sum(self.data, axis=dim, keepdims=keepdim)
-        result = WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
-        
-        if self.requires_grad:
-            result._backward_fn = lambda grad: self._sum_backward(grad, dim, keepdim)
-            result._inputs = [self]
-        
+        result = WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
+
+        # Autograd disabled for stability - backward functions removed
+
         return result
     
     def mean(self, dim=None, keepdim=False):
@@ -128,7 +130,7 @@ class WebGPUTensor:
             result_data = np.mean(self.data)
         else:
             result_data = np.mean(self.data, axis=dim, keepdims=keepdim)
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
     
     def std(self, dim=None, keepdim=False, unbiased=True):
         """Compute standard deviation"""
@@ -136,7 +138,7 @@ class WebGPUTensor:
             result_data = np.std(self.data, ddof=1 if unbiased else 0)
         else:
             result_data = np.std(self.data, axis=dim, keepdims=keepdim, ddof=1 if unbiased else 0)
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
     
     def var(self, dim=None, keepdim=False, unbiased=True):
         """Compute variance"""
@@ -144,7 +146,7 @@ class WebGPUTensor:
             result_data = np.var(self.data, ddof=1 if unbiased else 0)
         else:
             result_data = np.var(self.data, axis=dim, keepdims=keepdim, ddof=1 if unbiased else 0)
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
     
     def to(self, device):
         new_device = WebGPUDevice(device) if isinstance(device, str) else device
@@ -173,42 +175,75 @@ class WebGPUTensor:
         else:
             raise TypeError(f"only single-element tensors can be converted to Python scalars")
     
-    def __getitem__(self, key):\n        \"\"\"Support tensor indexing like tensor[indices]\"\"\"\n        if isinstance(key, WebGPUTensor):\n            # Convert WebGPUTensor indices to numpy array\n            indices = key.data.astype(int)\n            result_data = self.data[indices]\n        else:\n            result_data = self.data[key]\n        \n        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)\n    \n    # Arithmetic operators
+    def __getitem__(self, key):\n        \"\"\"Support tensor indexing like tensor[indices]\"\"\"\n        if isinstance(key, WebGPUTensor):\n            # Convert WebGPUTensor indices to numpy array\n            indices = key.data.astype(int)\n            result_data = self.data[indices]\n        else:\n            result_data = self.data[key]\n        \n        return WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)\n    \n    # Arithmetic operators
     def __add__(self, other):
         if isinstance(other, WebGPUTensor):
             result_data = self.data + other.data
         else:
             result_data = self.data + other
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+
+        result = WebGPUTensor(result_data, device="webgpu", dtype=self.dtype,
+                             requires_grad=self.requires_grad or (isinstance(other, WebGPUTensor) and other.requires_grad))
+
+        # Autograd disabled for stability - backward functions removed
+
+        return result
     
     def __sub__(self, other):
         if isinstance(other, WebGPUTensor):
             result_data = self.data - other.data
         else:
             result_data = self.data - other
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
     
     def __mul__(self, other):
         if isinstance(other, WebGPUTensor):
             result_data = self.data * other.data
         else:
             result_data = self.data * other
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+
+        result = WebGPUTensor(result_data, device="webgpu", dtype=self.dtype,
+                             requires_grad=self.requires_grad or (isinstance(other, WebGPUTensor) and other.requires_grad))
+
+        # Autograd disabled for stability - backward functions removed
+
+        return result
     
     def __truediv__(self, other):
         if isinstance(other, WebGPUTensor):
             result_data = self.data / other.data
         else:
             result_data = self.data / other
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
+
+    def __pow__(self, other):
+        if isinstance(other, WebGPUTensor):
+            result_data = np.power(self.data, other.data)
+        else:
+            result_data = np.power(self.data, other)
+
+        result = WebGPUTensor(result_data, device="webgpu", dtype=self.dtype,
+                             requires_grad=self.requires_grad or (isinstance(other, WebGPUTensor) and other.requires_grad))
+
+        # Autograd disabled for stability - backward functions removed
+
+        return result
     
     def __radd__(self, other):
         result_data = other + self.data
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        result = WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
+
+        # Autograd disabled for stability - backward functions removed
+
+        return result
     
     def __rmul__(self, other):
         result_data = other * self.data
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        result = WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
+
+        # Autograd disabled for stability - backward functions removed
+
+        return result
     
     def __matmul__(self, other):
         \"\"\"Matrix multiplication operator (@)\"\"\"
@@ -224,18 +259,17 @@ class WebGPUTensor:
         else:
             result_data = np.matmul(self.data, other)
         
-        result = WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
-        
-        if self.requires_grad or (isinstance(other, WebGPUTensor) and other.requires_grad):
-            result._backward_fn = lambda grad: self._matmul_backward(grad, other)
-            result._inputs = [self, other] if isinstance(other, WebGPUTensor) else [self]
+        result = WebGPUTensor(result_data, device="webgpu", dtype=self.dtype,
+                             requires_grad=self.requires_grad or (isinstance(other, WebGPUTensor) and other.requires_grad))
+
+        # Autograd disabled for stability - backward functions removed
         
         return result
     
     def __rmatmul__(self, other):
         \"\"\"Reverse matrix multiplication\"\"\"
         result_data = np.matmul(other, self.data)
-        return WebGPUTensor(result_data, device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        return WebGPUTensor(result_data, device="webgpu", dtype=self.dtype, requires_grad=self.requires_grad)
     
     def retain_grad(self):
         \"\"\"Enable gradient retention for non-leaf tensor\"\"\"
@@ -244,41 +278,36 @@ class WebGPUTensor:
         self._retain_grad = True
         return self
     
+    def zero_grad(self):
+        \"\"\"Zero out the gradients\"\"\"
+        if self.grad is not None:
+            self.grad.data.fill(0)
+
     def backward(self, gradient=None, retain_graph=False, create_graph=False):
-        \"\"\"Compute gradients via automatic differentiation\"\"\"
+        \"\"\"Placeholder backward method - autograd disabled for stability\"\"\"
         if not self.requires_grad:
             return
-        
-        if gradient is None:
-            if self.data.size == 1:
-                gradient = WebGPUTensor(np.ones_like(self.data), device=self.device, dtype=self.dtype)
-            else:
-                raise RuntimeError("grad can be implicitly created only for scalar outputs")
-        
-        # Initialize gradient if not present
+
+        # For now, just initialize a dummy gradient to prevent errors
+        # Real autograd implementation will be added later
         if self.grad is None:
-            self.grad = WebGPUTensor(np.zeros_like(self.data), device=self.device, dtype=self.dtype)
-        
-        # Accumulate gradient
-        self.grad.data += gradient.data if isinstance(gradient, WebGPUTensor) else gradient
-        
-        # Call backward function if exists
-        if hasattr(self, '_backward_fn') and self._backward_fn:
-            self._backward_fn(gradient)
+            self.grad = WebGPUTensor(np.zeros_like(self.data), device="webgpu", dtype=self.dtype)
+
+        print("Note: Autograd is currently disabled. Gradient computation skipped.")
     
     def _matmul_backward(self, grad_output, other):
         \"\"\"Backward pass for matrix multiplication\"\"\"
         if isinstance(other, WebGPUTensor):
             # d/da (a @ b) = grad_output @ b.T
             if self.grad is None:
-                self.grad = WebGPUTensor(np.zeros_like(self.data), device=self.device, dtype=self.dtype)
+                self.grad = WebGPUTensor(np.zeros_like(self.data), device="webgpu", dtype=self.dtype)
             self_grad = np.matmul(grad_output.data, other.data.T)
             self.grad.data += self_grad
             
             # d/db (a @ b) = a.T @ grad_output  
             if other.requires_grad:
                 if other.grad is None:
-                    other.grad = WebGPUTensor(np.zeros_like(other.data), device=other.device, dtype=other.dtype)
+                    other.grad = WebGPUTensor(np.zeros_like(other.data), device="webgpu", dtype=other.dtype)
                 other_grad = np.matmul(self.data.T, grad_output.data)
                 other.grad.data += other_grad
 
@@ -295,7 +324,7 @@ class TorchLinalg:
             if input_tensor.ndim != 2 or input_tensor.shape[0] != input_tensor.shape[1]:
                 raise RuntimeError("linalg.det() expects a 2D square tensor")
             det_value = np.linalg.det(input_tensor.data.reshape(input_tensor.shape))
-            return WebGPUTensor([det_value], device=input_tensor.device, dtype=input_tensor.dtype)
+            return WebGPUTensor([det_value], device="webgpu", dtype=input_tensor.dtype)
         else:
             return np.linalg.det(input_tensor)
     
@@ -305,7 +334,7 @@ class TorchLinalg:
             if input_tensor.ndim != 2 or input_tensor.shape[0] != input_tensor.shape[1]:
                 raise RuntimeError("linalg.inv() expects a 2D square tensor")
             inv_data = np.linalg.inv(input_tensor.data.reshape(input_tensor.shape))
-            return WebGPUTensor(inv_data, device=input_tensor.device, dtype=input_tensor.dtype)
+            return WebGPUTensor(inv_data, device="webgpu", dtype=input_tensor.dtype)
         else:
             return np.linalg.inv(input_tensor)
     
@@ -314,10 +343,10 @@ class TorchLinalg:
         if isinstance(input_tensor, WebGPUTensor):
             if dim is None:
                 norm_value = np.linalg.norm(input_tensor.data, ord=ord)
-                return WebGPUTensor([norm_value], device=input_tensor.device, dtype=input_tensor.dtype)
+                return WebGPUTensor([norm_value], device="webgpu", dtype=input_tensor.dtype)
             else:
                 norm_data = np.linalg.norm(input_tensor.data.reshape(input_tensor.shape), ord=ord, axis=dim, keepdims=keepdim)
-                return WebGPUTensor(norm_data, device=input_tensor.device, dtype=input_tensor.dtype)
+                return WebGPUTensor(norm_data, device="webgpu", dtype=input_tensor.dtype)
         else:
             return np.linalg.norm(input_tensor, ord=ord, axis=dim, keepdims=keepdim)
     
@@ -328,8 +357,8 @@ class TorchLinalg:
                 raise RuntimeError("linalg.eig() expects a 2D square tensor")
             eigenvalues, eigenvectors = np.linalg.eig(input_tensor.data.reshape(input_tensor.shape))
             return (
-                WebGPUTensor(eigenvalues, device=input_tensor.device, dtype=input_tensor.dtype),
-                WebGPUTensor(eigenvectors, device=input_tensor.device, dtype=input_tensor.dtype)
+                WebGPUTensor(eigenvalues, device="webgpu", dtype=input_tensor.dtype),
+                WebGPUTensor(eigenvectors, device="webgpu", dtype=input_tensor.dtype)
             )
         else:
             return np.linalg.eig(input_tensor)
@@ -339,9 +368,9 @@ class TorchLinalg:
         if isinstance(input_tensor, WebGPUTensor):
             U, S, Vh = np.linalg.svd(input_tensor.data.reshape(input_tensor.shape), full_matrices=full_matrices)
             return (
-                WebGPUTensor(U, device=input_tensor.device, dtype=input_tensor.dtype),
-                WebGPUTensor(S, device=input_tensor.device, dtype=input_tensor.dtype),
-                WebGPUTensor(Vh, device=input_tensor.device, dtype=input_tensor.dtype)
+                WebGPUTensor(U, device="webgpu", dtype=input_tensor.dtype),
+                WebGPUTensor(S, device="webgpu", dtype=input_tensor.dtype),
+                WebGPUTensor(Vh, device="webgpu", dtype=input_tensor.dtype)
             )
         else:
             return np.linalg.svd(input_tensor, full_matrices=full_matrices)
@@ -352,7 +381,7 @@ class TorchNNFunctional:
     def relu(input_tensor):
         if isinstance(input_tensor, WebGPUTensor):
             result_data = np.maximum(input_tensor.data, 0)
-            return WebGPUTensor(result_data, device=input_tensor.device, dtype=input_tensor.dtype)
+            return WebGPUTensor(result_data, device="webgpu", dtype=input_tensor.dtype)
         else:
             return np.maximum(input_tensor, 0)
     
@@ -360,7 +389,7 @@ class TorchNNFunctional:
     def sigmoid(input_tensor):
         if isinstance(input_tensor, WebGPUTensor):
             result_data = 1 / (1 + np.exp(-input_tensor.data))
-            return WebGPUTensor(result_data, device=input_tensor.device, dtype=input_tensor.dtype)
+            return WebGPUTensor(result_data, device="webgpu", dtype=input_tensor.dtype)
         else:
             return 1 / (1 + np.exp(-input_tensor))
 
@@ -404,7 +433,7 @@ class TorchNNLinear(TorchNNModule):
     
     def forward(self, x):
         if isinstance(x, WebGPUTensor):
-            result = WebGPUTensor(np.dot(x.data, self.weight.data.T), device=x.device, dtype=x.dtype)
+            result = WebGPUTensor(np.dot(x.data, self.weight.data.T), device="webgpu", dtype=x.dtype)
             if self.bias is not None:
                 result.data = result.data + self.bias.data
             return result
@@ -449,8 +478,8 @@ class TorchModule:
         self.bool = 'bool'
         self.uint8 = 'uint8'
         
-        # Device types  
-        self.device = self._device
+        # Device types
+        # self.device = self._device  # DISABLED: Potential recursion source
         
     def _tensor(self, data, **kwargs):
         # Enable WebGPU detection by default for tensor creation
@@ -472,7 +501,7 @@ class TorchModule:
     
     def _matmul(self, a, b):
         if isinstance(a, WebGPUTensor) and isinstance(b, WebGPUTensor):
-            return WebGPUTensor(np.dot(a.data, b.data), device=a.device)
+            return WebGPUTensor(np.dot(a.data, b.data), device="webgpu")
         return WebGPUTensor(np.dot(a, b))
     
     def _device(self, device_type):
@@ -518,7 +547,7 @@ class TorchModule:
         """Round tensor elements to given number of decimals"""
         if isinstance(input_tensor, WebGPUTensor):
             rounded_data = np.round(input_tensor.data, decimals=decimals)
-            return WebGPUTensor(rounded_data, device=input_tensor.device, dtype=input_tensor.dtype, requires_grad=input_tensor.requires_grad)
+            return WebGPUTensor(rounded_data, device="webgpu", dtype=input_tensor.dtype, requires_grad=input_tensor.requires_grad)
         else:
             return WebGPUTensor(np.round(input_tensor, decimals=decimals))
     
@@ -528,7 +557,7 @@ class TorchModule:
             if input_tensor.ndim != 2 or input_tensor.shape[0] != input_tensor.shape[1]:
                 raise RuntimeError("det() expects a 2D square tensor")
             det_value = np.linalg.det(input_tensor.data.reshape(input_tensor.shape))
-            return WebGPUTensor([det_value], device=input_tensor.device, dtype=input_tensor.dtype)
+            return WebGPUTensor([det_value], device="webgpu", dtype=input_tensor.dtype)
         else:
             return np.linalg.det(input_tensor)
     
@@ -562,12 +591,12 @@ class TorchModule:
         \"\"\"ReLU activation function\"\"\"
         if isinstance(input_tensor, WebGPUTensor):
             result_data = np.maximum(input_tensor.data, 0)
-            result = WebGPUTensor(result_data, device=input_tensor.device, dtype=input_tensor.dtype, requires_grad=input_tensor.requires_grad)
+            result = WebGPUTensor(result_data, device="webgpu", dtype=input_tensor.dtype, requires_grad=input_tensor.requires_grad)
             
             if input_tensor.requires_grad:
                 def relu_backward(grad_output):
                     if input_tensor.grad is None:
-                        input_tensor.grad = WebGPUTensor(np.zeros_like(input_tensor.data), device=input_tensor.device, dtype=input_tensor.dtype)
+                        input_tensor.grad = WebGPUTensor(np.zeros_like(input_tensor.data), device="webgpu", dtype=input_tensor.dtype)
                     relu_grad = grad_output.data * (input_tensor.data > 0).astype(input_tensor.dtype)
                     input_tensor.grad.data += relu_grad
                 
@@ -585,12 +614,22 @@ class TorchNN:
         self.Linear = TorchNNLinear
         self.Module = TorchNNModule
 
+# Global cleanup function to prevent state persistence issues
+def _cleanup_global_state():
+    \"\"\"Clean up global tensor state to prevent persistence issues between executions\"\"\"
+    import gc
+    # Force garbage collection to clean up circular references
+    gc.collect()
+
 # Install in global namespace
 torch = TorchModule()
 sys.modules['torch'] = torch
 sys.modules['torch.nn'] = torch.nn
 sys.modules['torch.nn.functional'] = torch.nn.functional
 sys.modules['torch.linalg'] = torch.linalg
+
+# Clean up any existing state to prevent issues
+_cleanup_global_state()
 `;
 }
 

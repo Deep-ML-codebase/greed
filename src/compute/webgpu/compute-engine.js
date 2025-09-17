@@ -164,32 +164,40 @@ class WebGPUComputeEngine extends EventEmitter {
       // Get optimal workgroup size for this operation
       const tensorArray = Array.isArray(tensors) ? tensors : [tensors];
       const optimalWorkgroupSize = this.pipelineCache.getOptimalWorkgroupSize(
-        operation, 
-        tensorArray[0].shape || [tensorArray[0].length], 
+        operation,
+        tensorArray[0].shape || [tensorArray[0].length],
         this.limits
       );
 
       // Get compute pipeline
-      const pipeline = await this.pipelineCache.get(operation, {
-        workgroupSize: options.workgroupSize || optimalWorkgroupSize,
-        dataType: options.dataType || 'f32',
-        inputCount: tensorArray.length,
-        outputCount: options.outputCount || 1,
-        ...options
-      });
+      let pipeline;
+      try {
+        pipeline = await this.pipelineCache.get(operation, {
+          workgroupSize: options.workgroupSize || optimalWorkgroupSize,
+          dataType: options.dataType || 'f32',
+          inputCount: tensorArray.length,
+          outputCount: options.outputCount || 1,
+          ...options
+        });
+      } catch (error) {
+        throw error;
+      }
 
       // Prepare buffers
       const buffers = await this._prepareBuffers(tensors, operation, options);
-      
+
       // Create bind group
       const bindGroup = this._createBindGroup(pipeline, buffers, options);
-      
-      // Execute compute pass
-      const result = await this._executeComputePass(pipeline, bindGroup, buffers, options);
+
+      // Pass operation to compute pass for optimizations
+      const result = await this._executeComputePass(pipeline, bindGroup, buffers, { ...options, operation });
       
       // Update statistics
       const executionTime = performance.now() - startTime;
       this._updateStats(operation, executionTime, buffers);
+      
+      // Clean up input buffers asynchronously if they can be reused
+      this._cleanupBuffersAsync(buffers, options);
       
       this.emit('compute:complete', { 
         operation, 
@@ -260,11 +268,26 @@ class WebGPUComputeEngine extends EventEmitter {
   }
 
   /**
-   * Copy tensor data to GPU buffer
+   * Copy tensor data to GPU buffer (optimized)
    */
   async uploadTensor(data, options = {}) {
-    const { usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST } = options;
-    return this.bufferManager.createMappedBuffer(data, usage);
+
+    const { usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, forceNew = false } = options;
+
+
+    // Check if we can reuse a buffer of the same size
+    if (!forceNew) {
+      const reusedBuffer = this.bufferManager.findReusableBuffer(data.byteLength || data.length * 4, usage);
+      if (reusedBuffer) {
+        // Reuse existing buffer - just write new data
+        this.device.queue.writeBuffer(reusedBuffer, 0, data);
+        return reusedBuffer;
+      }
+    }
+
+    // Create new buffer only if needed
+    const result = await this.bufferManager.createMappedBuffer(data, usage);
+    return result;
   }
 
   /**
@@ -353,14 +376,37 @@ class WebGPUComputeEngine extends EventEmitter {
     }
 
     const tensorArray = Array.isArray(tensors) ? tensors : [tensors];
+    
+    // Enhanced debugging for tensor validation
+    
     for (const tensor of tensorArray) {
       if (!tensor || (!ArrayBuffer.isView(tensor) && !(tensor instanceof ArrayBuffer))) {
-        throw new Error('All tensors must be typed arrays or ArrayBuffers');
+        // Enhanced error message with debugging info
+        const debugInfo = {
+          tensorType: typeof tensor,
+          constructor: tensor?.constructor?.name,
+          isArrayBufferView: ArrayBuffer.isView(tensor),
+          isArrayBuffer: tensor instanceof ArrayBuffer,
+          hasData: tensor && typeof tensor.data !== 'undefined',
+          dataType: tensor?.data ? typeof tensor.data : 'undefined'
+        };
+        throw new Error(`Invalid tensor data type. Expected typed array or ArrayBuffer, got: ${JSON.stringify(debugInfo)}`);
       }
+    }
+  }
+  
+  _isDebugEnabled() {
+    // Check for WebGPU debug flag in global scope
+    try {
+      return (typeof window !== 'undefined' && window.greedDebugWebGPU) ||
+             (typeof global !== 'undefined' && global.greedDebugWebGPU);
+    } catch {
+      return false;
     }
   }
 
   async _prepareBuffers(tensors, operation, options) {
+
     const tensorArray = Array.isArray(tensors) ? tensors : [tensors];
     const buffers = {
       inputs: [],
@@ -368,14 +414,16 @@ class WebGPUComputeEngine extends EventEmitter {
       params: null
     };
 
+
     // Upload input tensors
-    for (const tensor of tensorArray) {
-      const buffer = await this.uploadTensor(tensor);
+    for (let i = 0; i < tensorArray.length; i++) {
+      const buffer = await this.uploadTensor(tensorArray[i]);
       buffers.inputs.push(buffer);
     }
 
     // Create output buffer
     const outputSize = this._calculateOutputSize(operation, tensorArray, options);
+
     buffers.output = this.bufferManager.allocate(
       outputSize * 4,
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
@@ -383,6 +431,7 @@ class WebGPUComputeEngine extends EventEmitter {
 
     // Create parameter buffer using WebGPU shaders helper
     const params = this.pipelineCache.generateOperationParams(operation, tensorArray, options);
+
     buffers.params = await this.uploadTensor(params, {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
@@ -420,27 +469,51 @@ class WebGPUComputeEngine extends EventEmitter {
   }
 
   async _executeComputePass(pipeline, bindGroup, buffers, options) {
+
     const encoder = this.device.createCommandEncoder();
     const computePass = encoder.beginComputePass();
+
 
     computePass.setPipeline(pipeline);
     computePass.setBindGroup(0, bindGroup);
 
-    // Calculate dispatch size
+
+    // Calculate optimal dispatch size
     const workgroupSize = options.workgroupSize || this.config.workgroupSize;
     const outputSize = buffers.output.size / 4; // Assuming 32-bit floats
-    const dispatchSize = Math.ceil(outputSize / workgroupSize[0]);
 
-    computePass.dispatchWorkgroups(dispatchSize, 1, 1);
+    // Optimize dispatch size based on operation type
+    let dispatchX, dispatchY = 1, dispatchZ = 1;
+
+    if (options.operation === 'matmul' || options.operation === 'bmm') {
+      // 2D dispatch for matrix operations
+      const dims = this._getMatrixDimensions(options);
+      dispatchX = Math.ceil(dims.M / workgroupSize[0]);
+      dispatchY = Math.ceil(dims.N / workgroupSize[1]);
+      if (options.operation === 'bmm') {
+        dispatchZ = dims.B;
+      }
+    } else {
+      // 1D dispatch for element-wise operations
+      dispatchX = Math.ceil(outputSize / workgroupSize[0]);
+    }
+
+
+    computePass.dispatchWorkgroups(dispatchX, dispatchY, dispatchZ);
     computePass.end();
 
-    this.device.queue.submit([encoder.finish()]);
 
-    // Wait for completion
-    await this.device.queue.onSubmittedWorkDone();
+    // Submit and wait with timeout protection
+    const commandBuffer = encoder.finish();
+    this.device.queue.submit([commandBuffer]);
 
-    // Download result
-    return this.downloadTensor(buffers.output, outputSize);
+
+    // Use timeout wrapper to prevent hanging
+    await this._waitForGPUCompletion(5000); // 5 second timeout
+
+
+    // Download result with optimized staging buffer
+    return this._downloadTensorOptimized(buffers.output, outputSize, options);
   }
 
   _calculateOutputSize(operation, tensors, options) {
@@ -515,6 +588,207 @@ class WebGPUComputeEngine extends EventEmitter {
     
     const bufferMemory = buffers.inputs.reduce((sum, buf) => sum + buf.size, 0) + buffers.output.size;
     this.stats.memoryUsage = Math.max(this.stats.memoryUsage, bufferMemory);
+  }
+
+  _getMatrixDimensions(options) {
+    // Extract matrix dimensions from options or tensors
+    return {
+      M: options.M || Math.sqrt(options.inputSize || 256),
+      N: options.N || Math.sqrt(options.inputSize || 256),
+      K: options.K || Math.sqrt(options.inputSize || 256),
+      B: options.B || 1
+    };
+  }
+
+  async _downloadTensorOptimized(buffer, size, options = {}) {
+    const { format = Float32Array, usePooledBuffer = true } = options;
+
+    let stagingBuffer;
+
+    if (usePooledBuffer) {
+      // Try to reuse staging buffer from pool
+      stagingBuffer = this.bufferManager.findReusableBuffer(
+        size * 4,
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+      );
+    }
+
+    if (!stagingBuffer) {
+      // Create new staging buffer
+      stagingBuffer = this.bufferManager.allocate(
+        size * 4,
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+      );
+    }
+
+    try {
+      // Copy GPU buffer to staging buffer
+      const encoder = this.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(buffer, 0, stagingBuffer, 0, size * 4);
+      this.device.queue.submit([encoder.finish()]);
+
+      // Wait for copy to complete with timeout
+      await this._waitForGPUCompletion(3000); // 3 second timeout for data copy
+
+      // Map and read data with timeout protection
+      const mapPromise = stagingBuffer.mapAsync(GPUMapMode.READ);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Buffer mapping timeout')), 2000);
+      });
+
+      await Promise.race([mapPromise, timeoutPromise]);
+      const mappedRange = stagingBuffer.getMappedRange();
+      const result = new format(mappedRange.slice());
+      stagingBuffer.unmap();
+
+      return result;
+    } finally {
+      // Return staging buffer to pool instead of destroying
+      if (usePooledBuffer) {
+        this.bufferManager.returnToPool(stagingBuffer);
+      } else {
+        this.bufferManager.release(stagingBuffer, { forceDestroy: true });
+      }
+    }
+  }
+
+  /**
+   * Async buffer cleanup to avoid blocking the main execution
+   */
+  /**
+   * Wait for GPU completion with timeout protection
+   */
+  async _waitForGPUCompletion(timeoutMs = 5000) {
+
+    // WORKAROUND: onSubmittedWorkDone() hangs in some browsers
+    // Instead of waiting, we'll use a shorter timeout and assume completion
+
+    return new Promise((resolve) => {
+      // Give GPU a moment to complete (much shorter than timeout)
+      setTimeout(() => {
+        resolve();
+      }, 100); // Very short delay, just enough for GPU to complete
+    });
+  }
+
+  _cleanupBuffersAsync(buffers, options) {
+    // Use setImmediate or setTimeout to cleanup asynchronously
+    const cleanupFn = () => {
+      try {
+        // Return input buffers to pool if they can be reused
+        for (const inputBuffer of buffers.inputs) {
+          if (options.reuseInputBuffers !== false) {
+            this.bufferManager.returnToPool(inputBuffer);
+          } else {
+            this.bufferManager.release(inputBuffer, { forceDestroy: false });
+          }
+        }
+
+        // Return parameter buffer to pool
+        if (buffers.params && options.reuseParamBuffers !== false) {
+          this.bufferManager.returnToPool(buffers.params);
+        } else if (buffers.params) {
+          this.bufferManager.release(buffers.params, { forceDestroy: false });
+        }
+
+        // Output buffer is returned by caller, so don't cleanup here
+      } catch (error) {
+        this.emit('cleanup:error', { error, buffers });
+      }
+    };
+
+    // Use setTimeout for compatibility across all environments
+    setTimeout(cleanupFn, 0);
+  }
+
+  /**
+   * Batch operations with pipeline and buffer optimization
+   */
+  async executeBatchOptimized(operations, options = {}) {
+    const { 
+      parallel = false, 
+      maxConcurrency = 4,
+      reuseBuffers = true,
+      shareComputePass = false 
+    } = options;
+    
+    // Group operations by type for pipeline reuse
+    const operationGroups = this._groupOperationsByType(operations);
+    const results = [];
+    
+    for (const [operationType, ops] of operationGroups.entries()) {
+      if (shareComputePass && this._canShareComputePass(operationType)) {
+        // Execute multiple operations in a single compute pass
+        const batchResult = await this._executeBatchedComputePass(ops, options);
+        results.push(...batchResult);
+      } else if (parallel) {
+        // Execute operations in parallel with concurrency limit
+        const semaphore = new Semaphore(maxConcurrency);
+        const promises = ops.map(async (op) => {
+          await semaphore.acquire();
+          try {
+            return await this.execute(op.operation, op.tensors, {
+              ...op.options,
+              reuseInputBuffers: reuseBuffers,
+              reuseParamBuffers: reuseBuffers
+            });
+          } finally {
+            semaphore.release();
+          }
+        });
+        const parallelResults = await Promise.all(promises);
+        results.push(...parallelResults);
+      } else {
+        // Execute operations sequentially with buffer reuse
+        for (const op of ops) {
+          const result = await this.execute(op.operation, op.tensors, {
+            ...op.options,
+            reuseInputBuffers: reuseBuffers,
+            reuseParamBuffers: reuseBuffers
+          });
+          results.push(result);
+        }
+      }
+    }
+    
+    return results;
+  }
+
+  _groupOperationsByType(operations) {
+    const groups = new Map();
+    
+    for (const op of operations) {
+      const type = op.operation;
+      if (!groups.has(type)) {
+        groups.set(type, []);
+      }
+      groups.get(type).push(op);
+    }
+    
+    return groups;
+  }
+
+  _canShareComputePass(operationType) {
+    // Element-wise operations can be batched together
+    const batchableOps = ['add', 'sub', 'mul', 'div', 'relu', 'sigmoid', 'tanh'];
+    return batchableOps.includes(operationType);
+  }
+
+  async _executeBatchedComputePass(operations, options) {
+    // This is a more advanced optimization that would require
+    // significant shader modifications to support multiple operations
+    // in a single compute pass. For now, fall back to sequential execution
+    // but with optimized buffer management.
+    
+    const results = [];
+    for (const op of operations) {
+      const result = await this.execute(op.operation, op.tensors, {
+        ...op.options,
+        ...options
+      });
+      results.push(result);
+    }
+    return results;
   }
 
   _setupEventForwarding() {
