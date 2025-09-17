@@ -1,6 +1,6 @@
 {
   "name": "greed.js",
-  "version": "2.0.1",
+  "version": "3.0.0",
   "description": "Run Python libraries in the browser with WebGPU acceleration - PyTorch, NumPy, and more. Modular architecture with full backward compatibility.",
   "main": "dist/greed.js",
   "module": "src/core/greed-v2.js",

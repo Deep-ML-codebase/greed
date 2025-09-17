@@ -323,7 +323,7 @@ class SecurityValidator extends EventEmitter {
     for (const [category, patterns] of Object.entries(this.dangerousPatterns)) {
       for (const pattern of patterns) {
         const matches = code.match(pattern.regex);
-        if (matches) {
+        if (matches && pattern.severity !== 'none') {
           threats.push({
             category,
             type: 'dangerous',
@@ -341,7 +341,7 @@ class SecurityValidator extends EventEmitter {
     for (const [category, patterns] of Object.entries(this.suspiciousPatterns)) {
       for (const pattern of patterns) {
         const matches = code.match(pattern.regex);
-        if (matches) {
+        if (matches && pattern.severity !== 'none') {
           threats.push({
             category,
             type: 'suspicious',
@@ -432,12 +432,26 @@ class SecurityValidator extends EventEmitter {
       };
     }
     
-    // Critical and high-risk operations are always blocked
+    // Critical operations are blocked, high-risk only in strict mode
     if (riskLevel === 'critical' || (riskLevel === 'high' && this.config.strictMode)) {
       this.stats.blockedOperations++;
       this.emit('policy:blocked', { riskLevel, threats: threats.length });
-      
+
+      // Debug logging to see what threats are detected
+      console.error('🚨 Security threats detected:', threats.map(t => ({
+        pattern: t.pattern,
+        severity: t.severity,
+        description: t.description,
+        firstMatch: t.firstMatch
+      })));
+
       throw new SecurityError(`Security policy violation: ${riskLevel} risk detected with ${threats.length} threats`);
+    }
+
+    // Log high-risk operations as warnings when not in strict mode
+    if (riskLevel === 'high' && !this.config.strictMode) {
+      console.warn(`⚠️ High-risk operation detected (${threats.length} threats) but allowed in non-strict mode`);
+      this.emit('policy:warning', { riskLevel, threats: threats.length });
     }
     
     // Medium-risk operations may be allowed with warnings
@@ -550,7 +564,7 @@ class SecurityValidator extends EventEmitter {
       codeExecution: [
         {
           name: 'eval',
-          regex: /\beval\s*\(/g,
+          regex: /(?:^|[^.\w])eval\s*\(/g,
           severity: 'critical',
           description: 'Dynamic code execution with eval()'
         },
@@ -610,7 +624,7 @@ class SecurityValidator extends EventEmitter {
         {
           name: 'getattr',
           regex: /\bgetattr\s*\(/g,
-          severity: 'medium',
+          severity: 'low', // Reduced from medium - common in ML code
           description: 'Attribute access via getattr'
         },
         {
@@ -622,7 +636,7 @@ class SecurityValidator extends EventEmitter {
         {
           name: 'hasattr',
           regex: /\bhasattr\s*\(/g,
-          severity: 'low',
+          severity: 'none', // Disabled - very common and safe in ML code
           description: 'Attribute existence check'
         }
       ],
