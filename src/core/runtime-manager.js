@@ -10,6 +10,10 @@ class RuntimeManager extends EventEmitter {
     this.config = {
       pyodideIndexURL: config.pyodideIndexURL || 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/',
       preloadPackages: config.preloadPackages || ['numpy'],
+      availablePackages: config.availablePackages || [
+        'numpy', 'scipy', 'matplotlib', 'pandas', 'scikit-learn',
+        'plotly', 'seaborn', 'statsmodels', 'sympy', 'networkx'
+      ],
       timeout: config.initTimeout || 30000,
       ...config
     };
@@ -102,7 +106,6 @@ class RuntimeManager extends EventEmitter {
       return Array.from(this.installedPackages);
     } catch (error) {
       // Log the error but don't throw - allows execution to continue
-      console.warn(`⚠️ Failed to install ${packagesToLoad.join(', ')}: ${error.message}`);
       this.emit('packages:error', { error, packages: packagesToLoad });
 
       // Mark packages as installed anyway to prevent retry loops
@@ -132,27 +135,29 @@ class RuntimeManager extends EventEmitter {
     }
 
     try {
-      // DISABLED: Auto-package loading due to 'await' syntax errors
-      // These cause browser freeze issues during package installation
-      // Users can manually import packages if needed
+      // Auto-load packages if code imports them
+      const packageChecks = [
+        { check: this._needsMatplotlib.bind(this), loader: this._ensureMatplotlibLoaded.bind(this) },
+        { check: this._needsPandas.bind(this), loader: this._ensurePandasLoaded.bind(this) },
+        { check: this._needsScipy.bind(this), loader: this._ensureScipyLoaded.bind(this) },
+        { check: this._needsPlotly.bind(this), loader: this._ensurePlotlyLoaded.bind(this) },
+        { check: this._needsSklearn.bind(this), loader: this._ensureSklearnLoaded.bind(this) }
+      ];
 
-      // Auto-load matplotlib if code imports it
-      // if (this._needsMatplotlib(code)) {
-      //   await this._ensureMatplotlibLoaded();
-      // }
-
-      // Auto-load pandas if code imports it
-      // if (this._needsPandas(code)) {
-      //   await this._ensurePandasLoaded();
-      // }
+      // Check and load packages sequentially to avoid conflicts
+      for (const { check, loader } of packageChecks) {
+        if (check(code)) {
+          await loader();
+        }
+      }
 
       // Set globals if provided - with error handling to prevent fatal errors
       for (const [key, value] of Object.entries(globals)) {
         try {
           this.pyodide.globals.set(key, value);
         } catch (globalError) {
-          console.warn(`Failed to set global '${key}':`, globalError.message);
           // Continue with other globals instead of failing completely
+          this.emit('global:error', { key, error: globalError.message });
         }
       }
 
@@ -178,7 +183,7 @@ finally:
 
         // Set up a non-interrupting timeout warning
         const timeoutWarning = setTimeout(() => {
-          console.warn(`⚠️ Python execution taking longer than ${timeout}ms, but continuing to avoid Pyodide corruption`);
+          this.emit('execution:timeout', { timeout, stage: 'capture_output' });
         }, timeout);
 
         try {
@@ -192,7 +197,7 @@ finally:
         try {
           capturedOutput = this.pyodide.globals.get('_captured_output') || '';
         } catch (getError) {
-          console.warn('Failed to get captured output:', getError.message);
+          this.emit('output:error', { error: getError.message });
           capturedOutput = 'Output capture failed';
         }
         result = { output: capturedOutput };
@@ -203,14 +208,14 @@ finally:
           this.pyodide.globals.delete('_output_buffer');
           this.pyodide.globals.delete('_original_stdout');
         } catch (cleanupError) {
-          // Ignore cleanup errors but log them
-          console.warn('Cleanup warning:', cleanupError.message);
+          // Ignore cleanup errors but emit them
+          this.emit('cleanup:warning', { error: cleanupError.message });
         }
       } else {
         // Use consistent async execution without Promise.race to avoid interruption errors
         // Set up a non-interrupting timeout warning
         const timeoutWarning = setTimeout(() => {
-          console.warn(`⚠️ Python execution taking longer than ${timeout}ms, but continuing to avoid Pyodide corruption`);
+          this.emit('execution:timeout', { timeout, stage: 'capture_output' });
         }, timeout);
 
         try {
@@ -237,7 +242,7 @@ finally:
     try {
       return this.pyodide.globals.get(name);
     } catch (error) {
-      console.warn(`Failed to get global '${name}':`, error.message);
+      this.emit('global:get:error', { name, error: error.message });
       return undefined;
     }
   }
@@ -252,7 +257,7 @@ finally:
     try {
       this.pyodide.globals.set(name, value);
     } catch (error) {
-      console.warn(`Failed to set global '${name}':`, error.message);
+      this.emit('global:set:error', { name, error: error.message });
       throw error; // Re-throw since this is a direct API call
     }
   }
@@ -318,7 +323,7 @@ gc.collect()
 `);
 
     } catch (error) {
-      console.warn('Failed to clear execution state:', error.message);
+      this.emit('state:clear:error', { error: error.message });
     }
   }
 
@@ -398,7 +403,6 @@ gc.collect()
       }
     } catch (error) {
       this.emit('package:error', { package: 'matplotlib', error });
-      console.warn(`⚠️ Failed to load matplotlib: ${error.message}`);
       // Don't throw - allow execution to continue
     }
   }
@@ -429,8 +433,94 @@ gc.collect()
       }
     } catch (error) {
       this.emit('package:error', { package: 'pandas', error });
-      console.warn(`⚠️ Failed to load pandas: ${error.message}`);
       // Don't throw - allow execution to continue
+    }
+  }
+
+  /**
+   * Check if code requires scipy
+   */
+  _needsScipy(code) {
+    const scipyPatterns = [
+      /import\s+scipy/,
+      /from\s+scipy/,
+      /scipy\./
+    ];
+    return scipyPatterns.some(pattern => pattern.test(code));
+  }
+
+  /**
+   * Ensure scipy is loaded and available
+   */
+  async _ensureScipyLoaded() {
+    try {
+      if (!this.installedPackages.has('scipy')) {
+        this.emit('package:loading', { package: 'scipy' });
+        await this.pyodide.loadPackage('scipy');
+        this.installedPackages.add('scipy');
+        this.emit('package:loaded', { package: 'scipy' });
+      }
+    } catch (error) {
+      this.emit('package:error', { package: 'scipy', error });
+    }
+  }
+
+  /**
+   * Check if code requires plotly
+   */
+  _needsPlotly(code) {
+    const plotlyPatterns = [
+      /import\s+plotly/,
+      /from\s+plotly/,
+      /plotly\./,
+      /import\s+plotly\.graph_objects/,
+      /import\s+plotly\.express/
+    ];
+    return plotlyPatterns.some(pattern => pattern.test(code));
+  }
+
+  /**
+   * Ensure plotly is loaded and available
+   */
+  async _ensurePlotlyLoaded() {
+    try {
+      if (!this.installedPackages.has('plotly')) {
+        this.emit('package:loading', { package: 'plotly' });
+        await this.pyodide.loadPackage('plotly');
+        this.installedPackages.add('plotly');
+        this.emit('package:loaded', { package: 'plotly' });
+      }
+    } catch (error) {
+      this.emit('package:error', { package: 'plotly', error });
+    }
+  }
+
+  /**
+   * Check if code requires scikit-learn
+   */
+  _needsSklearn(code) {
+    const sklearnPatterns = [
+      /import\s+sklearn/,
+      /from\s+sklearn/,
+      /sklearn\./,
+      /from\s+sklearn\.\w+/
+    ];
+    return sklearnPatterns.some(pattern => pattern.test(code));
+  }
+
+  /**
+   * Ensure scikit-learn is loaded and available
+   */
+  async _ensureSklearnLoaded() {
+    try {
+      if (!this.installedPackages.has('scikit-learn')) {
+        this.emit('package:loading', { package: 'scikit-learn' });
+        await this.pyodide.loadPackage('scikit-learn');
+        this.installedPackages.add('scikit-learn');
+        this.emit('package:loaded', { package: 'scikit-learn' });
+      }
+    } catch (error) {
+      this.emit('package:error', { package: 'scikit-learn', error });
     }
   }
 

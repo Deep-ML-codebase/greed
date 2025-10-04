@@ -147,9 +147,6 @@ class Greed extends EventEmitter {
     this.emit('operation:start', { operationId, codeLength: code.length });
 
     try {
-      // Clean up any residual state before execution
-      await this._cleanupExecutionState();
-
       // Security validation
       const securityResult = this.security.validatePythonCode(code, {
         allowWarnings: options.allowWarnings || false,
@@ -191,6 +188,26 @@ class Greed extends EventEmitter {
 
       throw error;
     }
+  }
+
+  /**
+   * Alias for run() - maintains backward compatibility
+   * Execute Python code with the same options as run()
+   */
+  async runPython(code, options = {}) {
+    return this.run(code, options);
+  }
+
+  /**
+   * Clear Python execution state (user variables)
+   * Use this to reset the Python environment between sessions
+   * Note: This preserves torch, numpy, and other library imports
+   */
+  async clearState() {
+    if (!this.isInitialized) {
+      throw new Error('Greed not initialized. Call initialize() first.');
+    }
+    await this._cleanupExecutionState();
   }
 
   /**
@@ -573,7 +590,7 @@ except ImportError:
         validatePolyfill(polyfillCode);
 
         logger.debug('Installing PyTorch polyfill from extracted module');
-        await this.runtime.runPython(polyfillCode, { captureOutput: false });
+        await this.runtime.runPython(polyfillCode, { captureOutput: false, validateInput: false });
       } else {
         logger.debug('PyTorch polyfill already installed, skipping re-installation');
       }

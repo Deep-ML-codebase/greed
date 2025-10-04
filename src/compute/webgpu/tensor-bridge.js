@@ -18,7 +18,7 @@ export class TensorBridge {
   createWebGPUTensor(data, shape, dtype = 'float32', device = 'webgpu') {
     // Ensure compute engine is available and initialized
     if (!this.computeEngine || !this.computeEngine.isInitialized) {
-      console.warn('[WebGPU Debug] Compute engine not initialized, WebGPU tensor will fall back to CPU');
+      // WebGPU tensor will fall back to CPU when compute engine not initialized
     }
     
     const tensor = new WebGPUTensor(data, {
