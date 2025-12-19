@@ -1,8 +1,10 @@
 /**
  * RuntimeManager - Handles Pyodide initialization and Python package management
+ * Supports both main-thread and Web Worker modes
  * Extracted from monolithic Greed class for better separation of concerns
  */
 import EventEmitter from './event-emitter.js';
+import PyodideWorkerManager from '../compute/worker/pyodide-worker-manager.js';
 
 class RuntimeManager extends EventEmitter {
   constructor(config = {}) {
@@ -15,10 +17,20 @@ class RuntimeManager extends EventEmitter {
         'plotly', 'seaborn', 'statsmodels', 'sympy', 'networkx'
       ],
       timeout: config.initTimeout || 30000,
+      enableWorkers: config.enableWorkers !== false, // Worker mode by default
       ...config
     };
 
+    // Runtime mode (worker or main-thread)
+    this.mode = this.config.enableWorkers ? 'worker' : 'main';
+
+    // Main-thread mode properties
     this.pyodide = null;
+
+    // Worker mode manager
+    this.workerManager = null;
+
+    // Common properties
     this.isReady = false;
     this.installedPackages = new Set();
     this.initPromise = null;
@@ -37,17 +49,69 @@ class RuntimeManager extends EventEmitter {
   }
 
   async _initializeInternal() {
+    if (this.mode === 'worker') {
+      return this._initializeWorkerMode();
+    } else {
+      return this._initializeMainThreadMode();
+    }
+  }
+
+  /**
+   * Initialize in Web Worker mode (prevents UI blocking)
+   */
+  async _initializeWorkerMode() {
     try {
-      this.emit('init:start', { stage: 'pyodide' });
-      
+      this.emit('init:start', { stage: 'worker', mode: 'worker' });
+
+      // Create worker manager
+      this.workerManager = new PyodideWorkerManager({
+        pyodideIndexURL: this.config.pyodideIndexURL,
+        preloadPackages: this.config.preloadPackages,
+        timeout: this.config.timeout
+      });
+
+      // Forward worker events
+      this.workerManager.on('init:progress', (data) => this.emit('init:progress', data));
+      this.workerManager.on('init:complete', (data) => {
+        this.installedPackages = new Set(data.installedPackages);
+        this.emit('init:complete', data);
+      });
+      this.workerManager.on('init:error', (data) => this.emit('init:error', data));
+      this.workerManager.on('packages:loading', (data) => this.emit('packages:loading', data));
+      this.workerManager.on('packages:loaded', (data) => this.emit('packages:loaded', data));
+      this.workerManager.on('execution:complete', (data) => this.emit('execution:complete', data));
+      this.workerManager.on('execution:error', (data) => this.emit('execution:error', data));
+      this.workerManager.on('execution:stdout', (data) => this.emit('execution:stdout', data));
+
+      // Initialize worker
+      await this.workerManager.initialize();
+
+      this.isReady = true;
+      return true;
+    } catch (error) {
+      this.emit('init:error', { error, stage: 'worker-initialization' });
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize in main-thread mode (may block UI)
+   */
+  async _initializeMainThreadMode() {
+    try {
+      this.emit('init:start', { stage: 'pyodide', mode: 'main' });
+
       // Validate Pyodide availability
       if (typeof loadPyodide === 'undefined') {
         throw new Error('Pyodide not loaded. Please include pyodide.js in your HTML.');
       }
 
-      // Initialize with timeout
+      // Initialize with timeout and 4GB memory limit
       const pyodidePromise = loadPyodide({
-        indexURL: this.config.pyodideIndexURL
+        indexURL: this.config.pyodideIndexURL,
+        // Enable 4GB WASM memory for large models
+        // Requires Memory64 support (Chrome 119+, Firefox 128+)
+        args: ['-Xalloc-env=PYODIDE_WASM_MEMORY=4294967296']
       });
 
       this.pyodide = await Promise.race([
@@ -65,7 +129,7 @@ class RuntimeManager extends EventEmitter {
 
       this.isReady = true;
       this.emit('init:complete', { installedPackages: Array.from(this.installedPackages) });
-      
+
       return true;
     } catch (error) {
       this.emit('init:error', { error, stage: 'initialization' });
@@ -81,12 +145,18 @@ class RuntimeManager extends EventEmitter {
       throw new Error('Runtime not initialized. Call initialize() first.');
     }
 
-    return this._loadPackages(packages);
+    if (this.mode === 'worker') {
+      const result = await this.workerManager.loadPackages(packages);
+      result.forEach(pkg => this.installedPackages.add(pkg));
+      return result;
+    } else {
+      return this._loadPackages(packages);
+    }
   }
 
   async _loadPackages(packages) {
     const packagesToLoad = packages.filter(pkg => !this.installedPackages.has(pkg));
-    
+
     if (packagesToLoad.length === 0) {
       return Array.from(this.installedPackages);
     }
@@ -123,33 +193,57 @@ class RuntimeManager extends EventEmitter {
       throw new Error('Runtime not initialized. Call initialize() first.');
     }
 
-    const {
-      captureOutput = false,
-      timeout = 1000,
-      globals = {},
-      validateInput = true
-    } = options;
+    // Extract validateInput for security check, but pass full options to execution methods
+    const { validateInput = true } = options;
 
     if (validateInput && this._containsDangerousPatterns(code)) {
       throw new SecurityError('Potentially dangerous code patterns detected');
     }
 
-    try {
-      // Auto-load packages if code imports them
-      const packageChecks = [
-        { check: this._needsMatplotlib.bind(this), loader: this._ensureMatplotlibLoaded.bind(this) },
-        { check: this._needsPandas.bind(this), loader: this._ensurePandasLoaded.bind(this) },
-        { check: this._needsScipy.bind(this), loader: this._ensureScipyLoaded.bind(this) },
-        { check: this._needsPlotly.bind(this), loader: this._ensurePlotlyLoaded.bind(this) },
-        { check: this._needsSklearn.bind(this), loader: this._ensureSklearnLoaded.bind(this) }
-      ];
+    // Auto-load packages if code imports them
+    const packageChecks = [
+      { check: this._needsMatplotlib.bind(this), loader: this._ensureMatplotlibLoaded.bind(this) },
+      { check: this._needsPandas.bind(this), loader: this._ensurePandasLoaded.bind(this) },
+      { check: this._needsScipy.bind(this), loader: this._ensureScipyLoaded.bind(this) },
+      { check: this._needsPlotly.bind(this), loader: this._ensurePlotlyLoaded.bind(this) },
+      { check: this._needsSklearn.bind(this), loader: this._ensureSklearnLoaded.bind(this) }
+    ];
 
-      // Check and load packages sequentially to avoid conflicts
-      for (const { check, loader } of packageChecks) {
-        if (check(code)) {
-          await loader();
-        }
+    // Check and load packages sequentially to avoid conflicts
+    for (const { check, loader } of packageChecks) {
+      if (check(code)) {
+        await loader();
       }
+    }
+
+    // Delegate to worker or main thread - pass all options to preserve taskId, streamOutput, etc.
+    if (this.mode === 'worker') {
+      return this._runPythonWorker(code, options);
+    } else {
+      return this._runPythonMain(code, options);
+    }
+  }
+
+  /**
+   * Execute Python code in worker mode (non-blocking)
+   */
+  async _runPythonWorker(code, options) {
+    try {
+      const result = await this.workerManager.executePython(code, options);
+      return result;
+    } catch (error) {
+      this.emit('execution:error', { error, code: code.substring(0, 100) });
+      throw error;
+    }
+  }
+
+  /**
+   * Execute Python code on main thread (may block UI)
+   */
+  async _runPythonMain(code, options) {
+    const { captureOutput, timeout, globals = {}, taskId, streamOutput } = options;
+
+    try {
 
       // Set globals if provided - with error handling to prevent fatal errors
       for (const [key, value] of Object.entries(globals)) {
@@ -163,17 +257,63 @@ class RuntimeManager extends EventEmitter {
 
       let result;
       if (captureOutput) {
-        // Capture stdout for print statements - use async version to prevent fatal errors
+        // Extract taskId and streamOutput from options
+        // Only enable streaming if taskId is provided AND streamOutput is not explicitly false
+        const shouldStream = (streamOutput !== false) && Boolean(taskId);
+
+        // Inject streaming callback into Python globals if streaming enabled
+        if (shouldStream) {
+          this.pyodide.globals.set('__greed_emit_stdout__', (tid, output) => {
+            this.emit('execution:stdout', {
+              type: 'execution:stdout',
+              taskId: tid,
+              output: output,
+              timestamp: Date.now()
+            });
+          });
+        } else {
+        }
+
+        // Enhanced stdout capture with streaming support
         const outputCode = `
 import sys
 from io import StringIO
-_output_buffer = StringIO()
+import time
+
+class StreamingBuffer:
+    def __init__(self, task_id, emit_callback, should_stream):
+        self.buffer = StringIO()
+        self.task_id = task_id
+        self.emit_callback = emit_callback
+        self.should_stream = should_stream
+        self.pending_output = ""
+
+    def write(self, text):
+        self.buffer.write(text)
+        # Emit immediately for real-time streaming
+        if self.should_stream and self.emit_callback and text:
+            # Emit immediately - don't wait for time intervals
+            # This ensures output appears in real-time, even during sleep() calls
+            self.emit_callback(self.task_id, text)
+
+    def flush(self):
+        self.buffer.flush()
+        # Emit any remaining output (usually not needed with immediate emission)
+        if self.should_stream and self.emit_callback and self.pending_output:
+            self.emit_callback(self.task_id, self.pending_output)
+            self.pending_output = ""
+
+    def getvalue(self):
+        return self.buffer.getvalue()
+
+_output_buffer = StreamingBuffer('${taskId || ''}', ${shouldStream ? '__greed_emit_stdout__' : 'None'}, ${shouldStream ? 'True' : 'False'})
 _original_stdout = sys.stdout
 sys.stdout = _output_buffer
 
 try:
 ${code.split('\n').map(line => '    ' + line).join('\n')}
 finally:
+    sys.stdout.flush()
     sys.stdout = _original_stdout
     _captured_output = _output_buffer.getvalue()
 `;
@@ -181,15 +321,20 @@ finally:
         // Use runPythonAsync without Promise.race to avoid "interrupted by user" errors
         // Promise.race can interrupt Pyodide mid-execution causing fatal errors
 
-        // Set up a non-interrupting timeout warning
-        const timeoutWarning = setTimeout(() => {
-          this.emit('execution:timeout', { timeout, stage: 'capture_output' });
-        }, timeout);
+        // Set up a non-interrupting timeout warning (only if timeout > 0)
+        let timeoutWarning;
+        if (timeout && timeout > 0) {
+          timeoutWarning = setTimeout(() => {
+            this.emit('execution:timeout', { timeout, stage: 'capture_output' });
+          }, timeout);
+        }
 
         try {
           await this.pyodide.runPythonAsync(outputCode);
         } finally {
-          clearTimeout(timeoutWarning);
+          if (timeoutWarning) {
+            clearTimeout(timeoutWarning);
+          }
         }
 
         // Get captured output safely with error handling
@@ -207,21 +352,29 @@ finally:
           this.pyodide.globals.delete('_captured_output');
           this.pyodide.globals.delete('_output_buffer');
           this.pyodide.globals.delete('_original_stdout');
+          if (shouldStream) {
+            this.pyodide.globals.delete('__greed_emit_stdout__');
+          }
         } catch (cleanupError) {
           // Ignore cleanup errors but emit them
           this.emit('cleanup:warning', { error: cleanupError.message });
         }
       } else {
         // Use consistent async execution without Promise.race to avoid interruption errors
-        // Set up a non-interrupting timeout warning
-        const timeoutWarning = setTimeout(() => {
-          this.emit('execution:timeout', { timeout, stage: 'capture_output' });
-        }, timeout);
+        // Set up a non-interrupting timeout warning (only if timeout > 0)
+        let timeoutWarning;
+        if (timeout && timeout > 0) {
+          timeoutWarning = setTimeout(() => {
+            this.emit('execution:timeout', { timeout, stage: 'no_capture' });
+          }, timeout);
+        }
 
         try {
           result = await this.pyodide.runPythonAsync(code);
         } finally {
-          clearTimeout(timeoutWarning);
+          if (timeoutWarning) {
+            clearTimeout(timeoutWarning);
+          }
         }
       }
 
@@ -235,10 +388,15 @@ finally:
   /**
    * Get Python global variable
    */
-  getGlobal(name) {
+  async getGlobal(name) {
     if (!this.isReady) {
       throw new Error('Runtime not initialized');
     }
+
+    if (this.mode === 'worker') {
+      return await this.workerManager.getGlobal(name);
+    }
+
     try {
       return this.pyodide.globals.get(name);
     } catch (error) {
@@ -250,10 +408,15 @@ finally:
   /**
    * Set Python global variable
    */
-  setGlobal(name, value) {
+  async setGlobal(name, value) {
     if (!this.isReady) {
       throw new Error('Runtime not initialized');
     }
+
+    if (this.mode === 'worker') {
+      return await this.workerManager.setGlobal(name, value);
+    }
+
     try {
       this.pyodide.globals.set(name, value);
     } catch (error) {
@@ -332,7 +495,11 @@ gc.collect()
    */
   async cleanup() {
     try {
-      if (this.pyodide) {
+      if (this.mode === 'worker' && this.workerManager) {
+        // Terminate the worker
+        await this.workerManager.terminate();
+        this.workerManager = null;
+      } else if (this.pyodide) {
         // Try to clean up gracefully first using async version
         try {
           await this.pyodide.runPythonAsync(`

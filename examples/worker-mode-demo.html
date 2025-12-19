@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Greed.js - Web Worker Mode Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status.ready {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .demo-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        #output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .animation-test {
+            width: 50px;
+            height: 50px;
+            background: #007bff;
+            border-radius: 50%;
+            animation: bounce 1s infinite;
+            margin: 20px 0;
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-20px); }
+        }
+        .info-box {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .code-block {
+            background: #f4f4f4;
+            border-left: 3px solid #007bff;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Greed.js - Web Worker Mode Demo</h1>
+        <p>This demo shows how Greed.js runs Python code in a Web Worker, keeping your UI responsive even during heavy computations.</p>
+
+        <div class="info-box">
+            <strong>🎯 Worker Mode Benefits:</strong>
+            <ul>
+                <li>✅ UI stays responsive during long-running Python code</li>
+                <li>✅ No page freezing or "Unresponsive Script" warnings</li>
+                <li>✅ Better user experience for compute-intensive tasks</li>
+                <li>✅ Enabled by default - just use Greed.js!</li>
+            </ul>
+        </div>
+
+        <div id="status" class="status loading">Initializing Greed.js...</div>
+    </div>
+
+    <div class="container">
+        <h2>UI Responsiveness Test</h2>
+        <p>Watch the bouncing ball below. It should keep animating smoothly even while Python code runs!</p>
+        <div class="animation-test"></div>
+
+        <div class="demo-section">
+            <h3>Test 1: Heavy Computation (takes ~5-10 seconds)</h3>
+            <p>This runs a computationally intensive loop. In main-thread mode, it would freeze the UI.</p>
+            <div class="code-block">
+# Heavy computation test
+result = 0
+for i in range(10000000):
+    result += i * 2
+print(f"Result: {result}")
+            </div>
+            <button id="runHeavy" disabled>Run Heavy Computation</button>
+        </div>
+
+        <div class="demo-section">
+            <h3>Test 2: Neural Network Training</h3>
+            <p>Train a simple PyTorch model. Watch how the UI stays responsive!</p>
+            <div class="code-block">
+import torch
+import torch.nn as nn
+
+# Create simple model
+model = nn.Linear(10, 1)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+# Training loop
+for epoch in range(100):
+    x = torch.randn(32, 10)
+    y = torch.randn(32, 1)
+
+    loss = nn.MSELoss()(model(x), y)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    if epoch % 20 == 0:
+        print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+
+print("Training complete!")
+            </div>
+            <button id="runTrain" disabled>Run Training</button>
+        </div>
+
+        <div class="demo-section">
+            <h3>Test 3: Matrix Operations</h3>
+            <p>Perform large matrix multiplications.</p>
+            <div class="code-block">
+import torch
+
+# Create large matrices
+A = torch.randn(1000, 1000)
+B = torch.randn(1000, 1000)
+
+# Matrix multiplication
+C = torch.matmul(A, B)
+
+print(f"Result shape: {C.shape}")
+print(f"Sum: {C.sum().item():.2f}")
+print("Matrix operations complete!")
+            </div>
+            <button id="runMatrix" disabled>Run Matrix Operations</button>
+        </div>
+
+        <h2>Output</h2>
+        <div id="output">Waiting for initialization...</div>
+    </div>
+
+    <div class="container">
+        <h2>Configuration</h2>
+        <p>Greed.js is configured with worker mode:</p>
+        <div class="code-block">
+const greed = new Greed({
+    enableWorkers: true,  // ← Worker mode enabled (default)
+    preloadPackages: ['numpy']
+});
+        </div>
+
+        <p>To disable worker mode (not recommended for production):</p>
+        <div class="code-block">
+const greed = new Greed({
+    enableWorkers: false  // ← Main thread mode (may block UI)
+});
+        </div>
+    </div>
+
+    <!-- Load Pyodide first -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+
+    <!-- Load Greed.js -->
+    <script src="../dist/greed.js"></script>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const outputEl = document.getElementById('output');
+        const runHeavyBtn = document.getElementById('runHeavy');
+        const runTrainBtn = document.getElementById('runTrain');
+        const runMatrixBtn = document.getElementById('runMatrix');
+
+        let greed;
+
+        async function init() {
+            try {
+                outputEl.textContent = 'Initializing Greed.js with worker mode...\n';
+
+                // Initialize Greed with worker mode (default)
+                greed = new Greed({
+                    enableWorkers: true,  // Worker mode prevents UI blocking
+                    preloadPackages: ['numpy']
+                });
+
+                // Listen to initialization progress
+                greed.on('init:progress', (data) => {
+                    outputEl.textContent += `📦 ${data.stage}: ${data.message || data.status || 'loading'}\n`;
+                });
+
+                await greed.initialize();
+
+                statusEl.className = 'status ready';
+                statusEl.textContent = '✅ Greed.js ready! (Worker mode enabled)';
+                outputEl.textContent += '\n✅ Initialization complete!\n\nReady to run Python code. Click a button above to test!\n';
+
+                // Enable buttons
+                runHeavyBtn.disabled = false;
+                runTrainBtn.disabled = false;
+                runMatrixBtn.disabled = false;
+
+            } catch (error) {
+                statusEl.className = 'status error';
+                statusEl.textContent = '❌ Initialization failed: ' + error.message;
+                outputEl.textContent += '\n❌ Error: ' + error.message + '\n';
+            }
+        }
+
+        async function runCode(code, description) {
+            try {
+                outputEl.textContent += `\n${'='.repeat(60)}\n`;
+                outputEl.textContent += `▶️  Running: ${description}\n`;
+                outputEl.textContent += `${'='.repeat(60)}\n\n`;
+
+                const startTime = performance.now();
+
+                const result = await greed.run(code, {
+                    captureOutput: true
+                });
+
+                const endTime = performance.now();
+                const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+                if (result.output) {
+                    outputEl.textContent += result.output + '\n';
+                }
+
+                outputEl.textContent += `\n⏱️  Completed in ${duration}s\n`;
+                outputEl.scrollTop = outputEl.scrollHeight;
+
+            } catch (error) {
+                outputEl.textContent += `\n❌ Error: ${error.message}\n`;
+                outputEl.scrollTop = outputEl.scrollHeight;
+            }
+        }
+
+        // Event listeners
+        runHeavyBtn.addEventListener('click', () => {
+            runCode(`
+result = 0
+for i in range(10000000):
+    result += i * 2
+print(f"Result: {result}")
+print("Notice how the UI stayed responsive!")
+            `, 'Heavy Computation Test');
+        });
+
+        runTrainBtn.addEventListener('click', () => {
+            runCode(`
+import torch
+import torch.nn as nn
+
+model = nn.Linear(10, 1)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+for epoch in range(100):
+    x = torch.randn(32, 10)
+    y = torch.randn(32, 1)
+
+    loss = nn.MSELoss()(model(x), y)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+    if epoch % 20 == 0:
+        print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+
+print("Training complete! UI never froze!")
+            `, 'Neural Network Training');
+        });
+
+        runMatrixBtn.addEventListener('click', () => {
+            runCode(`
+import torch
+
+A = torch.randn(1000, 1000)
+B = torch.randn(1000, 1000)
+
+C = torch.matmul(A, B)
+
+print(f"Result shape: {C.shape}")
+print(f"Sum: {C.sum().item():.2f}")
+print("Matrix operations complete!")
+            `, 'Matrix Operations');
+        });
+
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>

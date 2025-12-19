@@ -4,51 +4,30 @@
  */
 const path = require('path');
 
-module.exports = {
+// Create two separate configs: one for main bundle, one for worker
+const mainConfig = {
   entry: {
     'greed': './src/core/greed-v2.js',
     'greed.min': './src/core/greed-v2.js'
   },
-  
+
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].js',
     library: {
       name: 'Greed',
       type: 'umd',
-      export: 'default'
+      export: 'default',
+      umdNamedDefine: true
     },
-    globalObject: 'this',
-    clean: true // Clean dist folder on each build
+    globalObject: 'globalThis',
+    clean: false // Don't clean - let webpack clean plugin handle it
   },
 
   optimization: {
-    splitChunks: {
-      chunks: 'all',
-      cacheGroups: {
-        // Core components
-        core: {
-          name: 'core',
-          test: /[\\/]src[\\/]core[\\/]/,
-          chunks: 'all',
-          priority: 30
-        },
-        // Compute engines
-        compute: {
-          name: 'compute',
-          test: /[\\/]src[\\/]compute[\\/]/,
-          chunks: 'all',
-          priority: 20
-        },
-        // Utilities
-        utils: {
-          name: 'utils',
-          test: /[\\/]src[\\/]utils[\\/]/,
-          chunks: 'all',
-          priority: 10
-        }
-      }
-    },
+    // Disable code splitting for npm package compatibility
+    // All code will be bundled into a single file
+    splitChunks: false,
     usedExports: true,
     sideEffects: false,
     minimize: true
@@ -124,3 +103,33 @@ module.exports = {
 
   target: ['web', 'es2020']
 };
+
+// Worker configuration - separate bundle without UMD wrapper
+const workerConfig = {
+  entry: {
+    'pyodide-worker': './src/compute/worker/pyodide-worker.js'
+  },
+
+  output: {
+    path: path.resolve(__dirname, 'dist'),
+    filename: '[name].js',
+    globalObject: 'self', // Workers use 'self' instead of 'window'
+    clean: false // Don't clean, main config already does that
+  },
+
+  optimization: {
+    splitChunks: false,
+    minimize: true
+  },
+
+  resolve: {
+    extensions: ['.js', '.mjs']
+  },
+
+  devtool: process.env.NODE_ENV === 'development' ? 'source-map' : false,
+
+  target: ['webworker', 'es2020']
+};
+
+// Export both configurations
+module.exports = [mainConfig, workerConfig];
