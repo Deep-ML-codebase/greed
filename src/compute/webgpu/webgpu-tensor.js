@@ -208,7 +208,11 @@ export class WebGPUTensor {
   async softmax(dim = -1) {
     return this._executeGPUOperation('softmax', null, { dim });
   }
-  
+
+  async log_softmax(dim = -1) {
+    return this._executeGPUOperation('log_softmax', null, { dim });
+  }
+
   // ===== REDUCTION OPERATIONS =====
   
   async sum(dim = null, keepdim = false) {
@@ -266,7 +270,11 @@ export class WebGPUTensor {
   async abs() {
     return this._executeGPUOperation('abs');
   }
-  
+
+  async clamp(min = null, max = null) {
+    return this._executeGPUOperation('clamp', null, { min, max });
+  }
+
   // ===== TENSOR MANIPULATION =====
   
   view(...shape) {
@@ -506,8 +514,9 @@ export class WebGPUTensor {
         }
       
       case 'softmax':
+      case 'log_softmax':
         return this.shape;
-      
+
       default:
         // Element-wise operations preserve shape
         return this.shape;
@@ -544,9 +553,30 @@ export class WebGPUTensor {
       log: (a) => a.map(val => Math.log(val)),
       sqrt: (a) => a.map(val => Math.sqrt(val)),
       abs: (a) => a.map(val => Math.abs(val)),
+      clamp: (a, b, options = {}) => {
+        const { min = null, max = null } = options;
+        return a.map(val => {
+          if (min !== null && val < min) return min;
+          if (max !== null && val > max) return max;
+          return val;
+        });
+      },
       relu: (a) => a.map(val => Math.max(0, val)),
       sigmoid: (a) => a.map(val => 1 / (1 + Math.exp(-val))),
       tanh: (a) => a.map(val => Math.tanh(val)),
+      softmax: (a, options = {}) => {
+        const max = Math.max(...a);
+        const exps = a.map(val => Math.exp(val - max));
+        const sum = exps.reduce((acc, val) => acc + val, 0);
+        return exps.map(val => val / sum);
+      },
+      log_softmax: (a, options = {}) => {
+        const max = Math.max(...a);
+        const exps = a.map(val => Math.exp(val - max));
+        const sum = exps.reduce((acc, val) => acc + val, 0);
+        const logSumExp = Math.log(sum);
+        return a.map(val => (val - max) - logSumExp);
+      },
       matmul: (a, b, options) => {
         // CPU matrix multiplication fallback
         const aShape = options.shape || [Math.sqrt(a.length), Math.sqrt(a.length)];
@@ -627,6 +657,129 @@ export class WebGPUTensor {
   
   __matmul__(other) {
     return this.matmul(other);
+  }
+
+  // In-place operations (modify tensor in place and return self)
+  // These are required by PyTorch optimizers
+
+  mul_(other) {
+    const result = this.mul(other);
+    this._data = result._data;
+    this.shape = result.shape;
+    this.dtype = result.dtype;
+    return this;
+  }
+
+  add_(other, alpha = 1) {
+    // PyTorch's add_ supports: tensor.add_(other, alpha=1) which does: tensor += alpha * other
+    if (alpha !== 1) {
+      const scaled = typeof other === 'number' ? other * alpha : this.mul(other, alpha);
+      const result = this.add(scaled);
+      this._data = result._data;
+      this.shape = result.shape;
+      this.dtype = result.dtype;
+    } else {
+      const result = this.add(other);
+      this._data = result._data;
+      this.shape = result.shape;
+      this.dtype = result.dtype;
+    }
+    return this;
+  }
+
+  sub_(other, alpha = 1) {
+    // PyTorch's sub_ supports: tensor.sub_(other, alpha=1) which does: tensor -= alpha * other
+    if (alpha !== 1) {
+      const scaled = typeof other === 'number' ? other * alpha : this.mul(other, alpha);
+      const result = this.sub(scaled);
+      this._data = result._data;
+      this.shape = result.shape;
+      this.dtype = result.dtype;
+    } else {
+      const result = this.sub(other);
+      this._data = result._data;
+      this.shape = result.shape;
+      this.dtype = result.dtype;
+    }
+    return this;
+  }
+
+  div_(other) {
+    const result = this.div(other);
+    this._data = result._data;
+    this.shape = result.shape;
+    this.dtype = result.dtype;
+    return this;
+  }
+
+  pow_(exponent) {
+    const result = this.pow(exponent);
+    this._data = result._data;
+    this.shape = result.shape;
+    this.dtype = result.dtype;
+    return this;
+  }
+
+  sqrt_() {
+    const result = this.sqrt();
+    this._data = result._data;
+    this.shape = result.shape;
+    this.dtype = result.dtype;
+    return this;
+  }
+
+  addcmul_(tensor1, tensor2, value = 1) {
+    // PyTorch's addcmul_: tensor += value * tensor1 * tensor2
+    const mul_result = tensor1.mul(tensor2);
+    const scaled = value !== 1 ? mul_result.mul(value) : mul_result;
+    const result = this.add(scaled);
+    this._data = result._data;
+    this.shape = result.shape;
+    this.dtype = result.dtype;
+    return this;
+  }
+
+  addcdiv_(tensor1, tensor2, value = 1) {
+    // PyTorch's addcdiv_: tensor += value * tensor1 / tensor2
+    const div_result = tensor1.div(tensor2);
+    const scaled = value !== 1 ? div_result.mul(value) : div_result;
+    const result = this.add(scaled);
+    this._data = result._data;
+    this.shape = result.shape;
+    this.dtype = result.dtype;
+    return this;
+  }
+
+  clamp_(min, max) {
+    const result = this.clamp(min, max);
+    this._data = result._data;
+    this.shape = result.shape;
+    this.dtype = result.dtype;
+    return this;
+  }
+
+  zero_() {
+    // Fill tensor with zeros in-place
+    this._data.fill(0);
+    return this;
+  }
+
+  fill_(value) {
+    // Fill tensor with a specific value in-place
+    this._data.fill(value);
+    return this;
+  }
+
+  copy_(other) {
+    // Copy data from another tensor in-place
+    if (other instanceof WebGPUTensor) {
+      this._data = new Float32Array(other._data);
+      this.shape = [...other.shape];
+      this.dtype = other.dtype;
+    } else {
+      throw new Error('copy_ requires a WebGPUTensor');
+    }
+    return this;
   }
 }
 

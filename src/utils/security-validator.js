@@ -28,7 +28,9 @@ class SecurityValidator extends EventEmitter {
       // Package whitelist
       allowedPackages: new Set(config.allowedPackages || [
         'numpy', 'math', 'random', 'json', 'datetime', 'collections',
-        'itertools', 'functools', 'operator', 're'
+        'itertools', 'functools', 'operator', 're', 'scipy', 'matplotlib',
+        'pandas', 'scikit-learn', 'sklearn', 'plotly', 'seaborn',
+        'statsmodels', 'sympy', 'networkx'
       ]),
       
       // Custom validation patterns
@@ -437,8 +439,8 @@ class SecurityValidator extends EventEmitter {
       this.stats.blockedOperations++;
       this.emit('policy:blocked', { riskLevel, threats: threats.length });
 
-      // Debug logging to see what threats are detected
-      console.error('🚨 Security threats detected:', threats.map(t => ({
+      // Emit detailed threat information for debugging
+      this.emit('threats:detected', threats.map(t => ({
         pattern: t.pattern,
         severity: t.severity,
         description: t.description,
@@ -448,10 +450,9 @@ class SecurityValidator extends EventEmitter {
       throw new SecurityError(`Security policy violation: ${riskLevel} risk detected with ${threats.length} threats`);
     }
 
-    // Log high-risk operations as warnings when not in strict mode
+    // Emit high-risk operations as warnings when not in strict mode
     if (riskLevel === 'high' && !this.config.strictMode) {
-      console.warn(`⚠️ High-risk operation detected (${threats.length} threats) but allowed in non-strict mode`);
-      this.emit('policy:warning', { riskLevel, threats: threats.length });
+      this.emit('policy:warning', { riskLevel, threats: threats.length, message: 'High-risk operation allowed in non-strict mode' });
     }
     
     // Medium-risk operations may be allowed with warnings

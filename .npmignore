@@ -1,32 +1,37 @@
-# Test files
+# Tests
 tests/
-test-*.html
 *.test.js
+*.spec.js
+playwright.config.js
 jest.config.js
-babel.config.js
 
 # Development files
-.eslintrc.js
-webpack.*.config.js
-.backup/
-node_modules/
-
-# Documentation files not needed in package
-IMPLEMENTATION-COMPLETE.md
-WEBGPU-IMPLEMENTATION-SUMMARY.md
-greed.png
-
-# Build artifacts that shouldn't be published
-dist/*.html
-dist/*.map
-
-# IDE and editor files
+.github/
 .vscode/
 .idea/
-*.swp
-*.swo
+examples/
+docs/
+
+# Source maps
+dist/*.map
+
+# Build config
+webpack.config.js
+webpack.simple.config.js
+babel.config.js
+.eslintrc.js
+
+# Git
+.git/
+.gitignore
+
+# OS
 .DS_Store
 
-# CI/CD files
-.github/
-.gitignore
+# Logs
+*.log
+
+# Temporary
+*.tmp
+*.bak
+*.backup

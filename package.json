@@ -1,10 +1,22 @@
 {
   "name": "greed.js",
-  "version": "3.0.0",
-  "description": "Run Python libraries in the browser with WebGPU acceleration - PyTorch, NumPy, and more. Modular architecture with full backward compatibility.",
+  "version": "3.1.0",
+  "description": "Lightweight, private alternative to Colab. Run PyTorch & NumPy in browser with GPU acceleration (8.8x speedup). Fast, secure, runs locally.",
   "main": "dist/greed.js",
   "module": "src/core/greed-v2.js",
   "types": "dist/greed.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/greed.d.ts",
+      "import": "./dist/greed.js",
+      "require": "./dist/greed.js",
+      "default": "./dist/greed.js"
+    },
+    "./dist/*": "./dist/*",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "browser": "dist/greed.js",
   "files": [
     "dist/",
     "src/",

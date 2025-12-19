@@ -11,6 +11,7 @@ import SecurityValidator from '../utils/security-validator.js';
 import { WebGPUTensor } from '../compute/webgpu/webgpu-tensor.js';
 import { createTensorBridge } from '../compute/webgpu/tensor-bridge.js';
 import { createPyTorchPolyfill, validatePolyfill } from '../polyfills/pytorch-runtime.js';
+import webgpuBridge from '../polyfills/webgpu-bridge.js';
 import logger from '../utils/logger.js';
 
 class Greed extends EventEmitter {
@@ -38,7 +39,7 @@ class Greed extends EventEmitter {
       // Runtime settings
       pyodideIndexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/',
       preloadPackages: ['numpy'],
-      initTimeout: 30000,
+      initTimeout: 0, // No timeout for long-running processes
       
       ...options
     });
@@ -147,9 +148,6 @@ class Greed extends EventEmitter {
     this.emit('operation:start', { operationId, codeLength: code.length });
 
     try {
-      // Clean up any residual state before execution
-      await this._cleanupExecutionState();
-
       // Security validation
       const securityResult = this.security.validatePythonCode(code, {
         allowWarnings: options.allowWarnings || false,
@@ -163,9 +161,13 @@ class Greed extends EventEmitter {
       // Execute in runtime with error handling
       const result = await this.runtime.runPython(code, {
         captureOutput: options.captureOutput !== false,
-        timeout: options.timeout || this.config.initTimeout,
+        timeout: options.timeout !== undefined ? options.timeout : 0, // 0 = no timeout for long-running processes
         globals: options.globals || {},
-        validateInput: false // Already validated above
+        validateInput: false, // Already validated above
+        taskId: options.taskId, // Pass taskId for streaming correlation
+        streamOutput: options.streamOutput !== false, // Pass streamOutput flag
+        captureStdout: options.captureStdout !== false,
+        captureStderr: options.captureStderr !== false
       });
 
       // Update statistics
@@ -191,6 +193,26 @@ class Greed extends EventEmitter {
 
       throw error;
     }
+  }
+
+  /**
+   * Alias for run() - maintains backward compatibility
+   * Execute Python code with the same options as run()
+   */
+  async runPython(code, options = {}) {
+    return this.run(code, options);
+  }
+
+  /**
+   * Clear Python execution state (user variables)
+   * Use this to reset the Python environment between sessions
+   * Note: This preserves torch, numpy, and other library imports
+   */
+  async clearState() {
+    if (!this.isInitialized) {
+      throw new Error('Greed not initialized. Call initialize() first.');
+    }
+    await this._cleanupExecutionState();
   }
 
   /**
@@ -478,12 +500,16 @@ except:
     this.runtime = new RuntimeManager({
       pyodideIndexURL: this.config.pyodideIndexURL,
       preloadPackages: this.config.preloadPackages,
-      timeout: this.config.initTimeout
+      timeout: this.config.initTimeout,
+      enableWorkers: this.config.enableWorkers  // Pass worker config
     });
     
     await this.runtime.initialize();
     this.componentsReady.runtime = true;
     this._forwardEvents(this.runtime, 'runtime');
+
+    // Forward execution:stdout events from runtime (for streaming output)
+    this.runtime.on('execution:stdout', (data) => this.emit('execution:stdout', data));
 
     // Initialize Compute Strategy (depends on memory, runtime)
     this.compute = new ComputeStrategy({
@@ -523,24 +549,13 @@ except:
 
     try {
       // Set up WebGPU tensor integration
-      console.log('[WebGPU Debug] Greed initialization - checking WebGPU availability');
-      console.log('[WebGPU Debug] this.compute:', this.compute ? 'present' : 'null');
-      if (this.compute) {
-        console.log('[WebGPU Debug] this.compute.availableStrategies:', this.compute.availableStrategies ? 'present' : 'null');
-        if (this.compute.availableStrategies) {
-          console.log('[WebGPU Debug] Available strategies:', Array.from(this.compute.availableStrategies));
-          console.log('[WebGPU Debug] Has webgpu strategy:', this.compute.availableStrategies.has('webgpu'));
-        }
-      }
-
       if (this.compute && this.compute.availableStrategies && this.compute.availableStrategies.has('webgpu')) {
-        console.log('[WebGPU Debug] WebGPU strategy available, setting up tensor integration');
         WebGPUTensor.setComputeEngine(this.compute.webgpu);
-        console.log('[WebGPU Debug] Calling createTensorBridge...');
         this.tensorBridge = createTensorBridge(this.compute.webgpu);
-        console.log('[WebGPU Debug] TensorBridge created and stored in this.tensorBridge');
-      } else {
-        console.log('[WebGPU Debug] WebGPU strategy NOT available - bridge will not be created');
+
+        // Initialize WebGPU bridge for Python operations
+        webgpuBridge.setComputeEngine(this.compute.webgpu);
+        logger.info('[Greed] WebGPU bridge initialized for Python↔GPU operations');
       }
 
       // Ensure numpy is loaded before installing PyTorch polyfill
@@ -573,7 +588,12 @@ except ImportError:
         validatePolyfill(polyfillCode);
 
         logger.debug('Installing PyTorch polyfill from extracted module');
-        await this.runtime.runPython(polyfillCode, { captureOutput: false });
+        // Increase timeout for large polyfill installation (can take 60-120 seconds)
+        await this.runtime.runPython(polyfillCode, {
+          captureOutput: false,
+          validateInput: false,
+          timeout: 180000 // 3 minutes for polyfill installation
+        });
       } else {
         logger.debug('PyTorch polyfill already installed, skipping re-installation');
       }
@@ -2056,6 +2076,46 @@ sys.modules['torch.cuda'] = torch.cuda
       // Get references to Python objects
       this.torchAPI = this.runtime.getGlobal('torch');
       this.numpy = this.runtime.getGlobal('np');
+
+      // Inject WebGPU bridge functions into Python if WebGPU is available
+      if (this.compute && this.compute.availableStrategies && this.compute.availableStrategies.has('webgpu')) {
+        logger.info('[Greed] Injecting WebGPU bridge functions into Python');
+
+        // Set Python globals to call JavaScript WebGPU bridge
+        this.runtime.setGlobal('__webgpu_allocate__', (data, shape, dtype) => {
+          return webgpuBridge.allocate(data, shape, dtype);
+        });
+
+        this.runtime.setGlobal('__webgpu_read__', async (bufferId) => {
+          return await webgpuBridge.read(bufferId);
+        });
+
+        this.runtime.setGlobal('__webgpu_matmul__', async (aId, bId, aShape, bShape) => {
+          return await webgpuBridge.matmul(aId, bId, aShape, bShape);
+        });
+
+        this.runtime.setGlobal('__webgpu_add__', async (aId, bId, shape) => {
+          return await webgpuBridge.add(aId, bId, shape);
+        });
+
+        this.runtime.setGlobal('__webgpu_multiply__', async (aId, bId, shape) => {
+          return await webgpuBridge.multiply(aId, bId, shape);
+        });
+
+        this.runtime.setGlobal('__webgpu_relu__', async (aId, shape) => {
+          return await webgpuBridge.relu(aId, shape);
+        });
+
+        this.runtime.setGlobal('__webgpu_transpose__', async (aId, shape) => {
+          return await webgpuBridge.transpose(aId, shape);
+        });
+
+        this.runtime.setGlobal('__webgpu_free__', (bufferId) => {
+          return webgpuBridge.free(bufferId);
+        });
+
+        logger.info('[Greed] WebGPU bridge functions injected successfully');
+      }
 
       this.emit('pytorch:setup:complete');
     } catch (error) {

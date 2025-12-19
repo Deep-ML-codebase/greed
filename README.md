@@ -1,12 +1,37 @@
 ![logo](greed.png)
 
-# Greed.js
+# Greed.js v3.0
 
 [![npm version](https://badge.fury.io/js/greed.js.svg)](https://badge.fury.io/js/greed.js)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/adityakhalkar/greed/workflows/CI/badge.svg)](https://github.com/adityakhalkar/greed/actions)
 
 A powerful JavaScript library that enables seamless execution of Python code in web browsers with **actual WebGPU-accelerated PyTorch support** using compute shaders and intelligent worker-based parallel execution.
+
+## 🎉 What's New in v3.0
+
+### 🔧 Modular Architecture Rewrite
+- **Component-based design**: Separated concerns across RuntimeManager, ComputeStrategy, MemoryManager, and SecurityValidator
+- **EventEmitter system**: Clean inter-component communication
+- **Better maintainability**: Each module has a single responsibility
+- **Improved testability**: Components can be tested in isolation
+
+### 📔 Notebook-Style State Persistence
+- **Variables persist between cells**: Define `a = 1` in one cell, use it in the next
+- **Session-based execution**: Python globals maintained across multiple `run()` calls
+- **Explicit cleanup API**: New `clearState()` method for manual state reset
+- **Smart memory management**: Cleanup on errors, preserve on success
+
+### 🛡️ Enhanced Security & Stability
+- **Comprehensive input validation**: Advanced threat detection system
+- **Graceful error recovery**: Automatic state cleanup after errors
+- **Production-ready**: Extensive testing and validation
+
+### 📊 Better Developer Experience
+- **Dual API**: Use `run()` or `runPython()` - both work identically
+- **Comprehensive events**: Monitor initialization, operations, errors, and cleanup
+- **Detailed statistics**: Memory usage, operation count, performance metrics
+- **Better error messages**: Clear, actionable error information
 
 ## 📦 Installation
 
@@ -20,12 +45,14 @@ yarn add greed.js
 
 ```html
 <!-- CDN -->
-<script src="https://unpkg.com/greed.js@2.0.1/dist/greed.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+<script src="https://unpkg.com/greed.js@3.0.0/dist/greed.min.js"></script>
 ```
 
 ## ✨ Features
 
 - **🏗️ Modular Architecture**: Clean separation of concerns with EventEmitter-based communication
+- **📔 Notebook-Style Execution**: Variables persist between cells like Jupyter notebooks
 - **PyTorch in Browser**: Full PyTorch polyfill with neural networks, tensors, and deep learning operations
 - **⚡ WebGPU Compute Shaders**: True GPU acceleration with 50+ optimized WGSL compute shaders for tensor operations
 - **🎯 Intelligent Fallback**: WebGPU → CPU → Worker execution strategy with automatic optimization
@@ -36,106 +63,266 @@ yarn add greed.js
 - **📊 Memory Management**: Automatic resource cleanup and memory pressure monitoring
 - **Dynamic Package Installation**: Automatically install Python packages on-demand
 - **Simple API**: Easy-to-use interface with comprehensive PyTorch compatibility
-- **Context Preservation**: Maintain variables and state across multiple executions
 - **📈 Production Ready**: Comprehensive testing, security validation, and performance optimization
 
-## Quick Start
+## 🚀 Quick Start
+
+### Basic Usage
 
 ```html
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Greed.js PyTorch Demo</title>
+    <title>Greed.js v3.0 Demo</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
-    <script type="module" src="dist/greed.js"></script>
-</head>
-<body>
-    <script>
-        async function runPyTorch() {
+    <script type="module">
+        import Greed from 'https://unpkg.com/greed.js@3.0.0/dist/greed.js';
+
+        async function main() {
+            // Initialize Greed.js
             const greed = new Greed({ enableWebGPU: true });
             await greed.initialize();
-            
+
+            // Cell 1: Define variables
+            await greed.run(`
+                import torch
+                a = 5
+                b = 10
+                print(f"Defined: a={a}, b={b}")
+            `);
+
+            // Cell 2: Use variables from previous cell (like Jupyter!)
+            await greed.run(`
+                c = a + b
+                print(f"Result: {a} + {b} = {c}")
+            `);
+
             // WebGPU-accelerated tensor operations
             const result = await greed.run(`
-import torch
+                # Tensors automatically use WebGPU when available
+                x = torch.randn(1000, 1000, device='webgpu')
+                y = torch.randn(1000, 1000, device='webgpu')
 
-# Create tensors with WebGPU acceleration  
-x = torch.randn(1000, 1000, device='webgpu')
-y = torch.randn(1000, 1000, device='webgpu')
+                # GPU-accelerated matrix multiplication
+                result = torch.matmul(x, y)
+                print(f"Matrix result shape: {result.shape}")
+                print(f"Device: {result.device}")
 
-# Matrix multiplication using WebGPU compute shaders
-result = torch.matmul(x, y)
-
-# Neural network operations on GPU
-model = torch.nn.Sequential(
-    torch.nn.Linear(1000, 512),
-    torch.nn.ReLU(),
-    torch.nn.Linear(512, 10)
-).to('webgpu')
-
-output = model(x)
-print(f"Model output shape: {output.shape}")
-print(f"WebGPU acceleration: {torch.cuda.is_available()}")
-
-output.mean().item()
+                result.mean().item()
             `);
-            
-            console.log('WebGPU PyTorch result:', result);
+
+            console.log('Result:', result);
+
+            // Clear state when needed
+            await greed.clearState();
         }
-        
-        runPyTorch();
+
+        main();
     </script>
+</head>
+<body>
+    <h1>Greed.js v3.0 - Notebook-Style Execution</h1>
 </body>
 </html>
 ```
 
-## 🏗️ Architecture
+## 🏗️ Architecture v3.0
 
-Greed.js features a modular architecture designed for performance, maintainability, and extensibility:
+Greed.js v3.0 features a modular architecture designed for performance, maintainability, and extensibility:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      Greed Core                         │
+│  (Orchestration, Events, Public API)                    │
+└────────┬────────────────────────────────────┬───────────┘
+         │                                    │
+    ┌────▼──────────┐                   ┌────▼──────────┐
+    │ RuntimeManager│                   │ComputeStrategy│
+    │  - Pyodide    │                   │  - WebGPU     │
+    │  - Packages   │                   │  - CPU        │
+    │  - Execution  │                   │  - Workers    │
+    └────┬──────────┘                   └────┬──────────┘
+         │                                    │
+    ┌────▼──────────┐                   ┌────▼──────────┐
+    │MemoryManager  │                   │SecurityValida-│
+    │  - GC         │                   │tor            │
+    │  - Monitoring │                   │  - Validation │
+    │  - Cleanup    │                   │  - Threat Det.│
+    └───────────────┘                   └───────────────┘
+```
 
 ### Core Components
 
-- **`RuntimeManager`**: Handles Pyodide initialization and Python package management
-- **`ComputeStrategy`**: Intelligent compute orchestration with WebGPU/CPU/Worker fallback
+- **`Greed`**: Main orchestrator with EventEmitter-based communication
+- **`RuntimeManager`**: Pyodide initialization, package management, Python execution
+- **`ComputeStrategy`**: WebGPU/CPU/Worker compute orchestration with intelligent fallback
 - **`WebGPUComputeEngine`**: Hardware-accelerated tensor operations using WebGPU compute shaders
 - **`WebGPUTensor`**: PyTorch-compatible tensor implementation with GPU acceleration
 - **`TensorBridge`**: Seamless interoperability between JavaScript and Python tensors
-- **`PipelineCache`**: Optimized shader compilation and caching system
-- **`MemoryManager`**: Advanced resource cleanup with automatic garbage collection  
+- **`MemoryManager`**: Advanced resource cleanup with automatic garbage collection
 - **`SecurityValidator`**: Comprehensive input validation and threat detection
 - **`EventEmitter`**: Base class providing event-driven inter-component communication
 
-### API Usage
+## 📔 Notebook-Style Execution
+
+v3.0 introduces true notebook-style execution where Python variables persist between cells:
 
 ```javascript
-// Basic usage
 const greed = new Greed();
 await greed.initialize();
-const result = await greed.run('import torch; print(torch.tensor([1,2,3]))');
 
-// Advanced configuration
+// Cell 1: Define data
+await greed.run(`
+    import torch
+    import torch.nn as nn
+
+    # Define model
+    class SimpleNet(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = nn.Linear(10, 5)
+
+        def forward(self, x):
+            return self.fc(x)
+
+    model = SimpleNet()
+    print("Model created")
+`);
+
+// Cell 2: Use model from previous cell
+await greed.run(`
+    # Model is still available!
+    x = torch.randn(32, 10)
+    output = model(x)
+    print(f"Output shape: {output.shape}")
+`);
+
+// Cell 3: Continue training
+await greed.run(`
+    optimizer = torch.optim.Adam(model.parameters())
+    loss = output.mean()
+    loss.backward()
+    optimizer.step()
+    print("Training step complete")
+`);
+
+// Clear state when starting new session
+await greed.clearState();
+```
+
+## 🎯 API Reference
+
+### Constructor
+
+```javascript
 const greed = new Greed({
-  enableWebGPU: true,
-  maxMemoryMB: 1024,
-  strictSecurity: true,
-  enableWorkers: true,
-  maxWorkers: 4
+    // Core settings
+    enableWebGPU: true,           // Enable WebGPU acceleration
+    enableWorkers: true,           // Enable Web Workers
+    maxWorkers: 4,                 // Number of worker threads
+
+    // Security settings
+    strictSecurity: true,          // Strict security validation
+    allowEval: false,              // Block eval() in Python
+    allowFileSystem: false,        // Block file system access
+    allowNetwork: false,           // Block network access
+
+    // Performance settings
+    maxMemoryMB: 1024,            // Max memory allocation
+    gcThreshold: 0.8,             // GC trigger threshold
+    enableProfiling: true,        // Performance profiling
+
+    // Runtime settings
+    pyodideIndexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/',
+    preloadPackages: ['numpy'],   // Packages to preload
+    initTimeout: 30000            // Initialization timeout
+});
+```
+
+### Main Methods
+
+#### `await greed.initialize()`
+Initialize all components and establish PyTorch API.
+
+```javascript
+await greed.initialize();
+```
+
+#### `await greed.run(code, options)` or `await greed.runPython(code, options)`
+Execute Python code with notebook-style state persistence.
+
+```javascript
+const result = await greed.run(`
+    import torch
+    x = torch.tensor([1, 2, 3])
+    x.sum().item()
+`, {
+    captureOutput: true,     // Capture print() output
+    timeout: 5000,           // Execution timeout
+    globals: {},             // Additional globals
+    allowWarnings: false,    // Allow security warnings
+    bypassSecurity: false    // Bypass security validation
 });
 
-// Component lifecycle events
-greed.on('init:complete', () => console.log('Initialization complete'));
-greed.on('memory:warning', (data) => console.log('Memory pressure:', data));
+console.log(result.output); // Printed output
+```
 
-// Advanced tensor operations
-await greed.tensor('matmul', [tensorA, tensorB], { device: 'webgpu' });
+#### `await greed.clearState()`
+Clear Python execution state (user variables). Preserves torch, numpy, and library imports.
 
-// Comprehensive statistics
+```javascript
+await greed.clearState();
+```
+
+#### `await greed.loadPackages(packages)`
+Load additional Python packages.
+
+```javascript
+await greed.loadPackages(['pandas', 'matplotlib']);
+```
+
+#### `greed.getStats()`
+Get comprehensive system statistics.
+
+```javascript
 const stats = greed.getStats();
 console.log('Memory usage:', stats.memory.memoryUsageMB);
 console.log('Operations:', stats.operations);
+console.log('Runtime status:', stats.runtime);
 ```
 
-## PyTorch Support
+#### `await greed.destroy()`
+Graceful shutdown and resource cleanup.
+
+```javascript
+await greed.destroy();
+```
+
+### Event System
+
+```javascript
+greed.on('init:complete', (data) => {
+    console.log('Initialization complete:', data.initTime, 'ms');
+});
+
+greed.on('operation:start', (data) => {
+    console.log('Executing code:', data.codeLength, 'bytes');
+});
+
+greed.on('operation:complete', (data) => {
+    console.log('Execution time:', data.executionTime, 'ms');
+});
+
+greed.on('operation:error', (data) => {
+    console.error('Execution error:', data.error);
+});
+
+greed.on('memory:warning', (data) => {
+    console.warn('Memory pressure:', data.memoryUsageMB, 'MB');
+});
+```
+
+## 🔥 PyTorch Support
 
 ### Tensor Operations
 ```python
@@ -164,7 +351,7 @@ class SimpleNet(nn.Module):
         self.fc1 = nn.Linear(784, 128)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(128, 10)
-    
+
     def forward(self, x):
         x = self.relu(self.fc1(x))
         return self.fc2(x)
@@ -187,378 +374,87 @@ loss = criterion(output, target)
 - **Neural network layers**: `nn.Linear`, `nn.ReLU`, `nn.CrossEntropyLoss`
 - **Automatic fallback**: Seamless CPU fallback for small tensors or when WebGPU unavailable
 
-## API Reference
-
-### Constructor
-```javascript
-const greed = new Greed({
-    maxWorkers: 2,           // Number of worker threads
-    enableWebGPU: true       // Enable WebGPU acceleration
-});
-```
-
-### Main Execution Method
-```javascript
-const result = await greed.executeCode(pythonCode, options);
-```
-
-**Options:**
-- `packages`: Array of Python packages to install
-- `useGPU`: Force GPU acceleration (default: auto-detect)
-- `preserveContext`: Maintain variables between executions
-
-**Returns:**
-```javascript
-{
-    success: true,
-    output: result,              // Python execution result
-    stdout: "print output",      // Console output
-    executionTime: 1234,         // Execution time in ms
-    usedGPU: true               // Whether GPU was used
-}
-```
-
-## ⚡ WebGPU Implementation
-
-Greed.js features a **complete WebGPU implementation** that replaces numpy operations with actual GPU compute shaders for **true hardware acceleration**.
-
-### WebGPU Architecture
-
-```
-PyTorch Tensor Operation
-        ↓
-WebGPU Compute Engine
-        ↓
-WGSL Compute Shader → GPU Execution → Result
-        ↑
-Pipeline Cache & Optimization
-```
-
-### Supported Operations
-
-#### **Arithmetic Operations**
-- `add`, `sub`, `mul`, `div`, `pow`
-- Element-wise operations with broadcasting support
-
-#### **Matrix Operations** 
-- `matmul` - Optimized matrix multiplication with tiled algorithms
-- `bmm` - Batch matrix multiplication for neural networks
-- `transpose` - Efficient dimension swapping
-
-#### **Activation Functions**
-- `relu`, `leaky_relu`, `sigmoid`, `tanh`, `gelu`
-- `softmax` - Numerically stable with workgroup reduction
-
-#### **Neural Network Operations**
-- `conv2d` - 2D convolution with optimized memory access
-- `maxpool2d`, `avgpool2d` - Pooling operations
-- `batch_norm` - Batch normalization with running statistics
-
-#### **Reduction Operations**
-- `sum`, `mean` - Parallel reduction with shared memory
-- `max`, `min` - Index-preserving reductions
-
-#### **Loss Functions**
-- `cross_entropy` - Numerically stable cross-entropy loss
-- `mse_loss` - Mean squared error with broadcasting
-
-### Performance Features
-
-#### **Intelligent Workgroup Sizing**
-```javascript
-// Automatically optimizes workgroup sizes based on operation type
-matmul: [16, 16, 1]    // 2D tiled matrix multiplication  
-conv2d: [8, 8, 8]      // 3D spatial convolution
-elementwise: [64, 1, 1] // 1D parallel processing
-reduction: [256, 1, 1]  // Maximize parallel reduction
-```
-
-#### **Pipeline Caching**
-- Automatic shader compilation and caching
-- LRU eviction for memory efficiency  
-- Warmup for common operations
-- Adaptive optimization based on usage patterns
-
-#### **Memory Management**
-- Buffer pooling and reuse
-- Automatic garbage collection
-- Memory pressure monitoring
-- Fallback to CPU when GPU memory exhausted
-
-### Usage Examples
-
-#### **Basic Tensor Operations**
-```javascript
-const greed = new Greed({ enableWebGPU: true });
-await greed.initialize();
-
-// WebGPU-accelerated tensor operations
-await greed.run(`
-import torch
-
-# Tensors automatically use WebGPU when available
-x = torch.randn(1000, 1000, device='webgpu')
-y = torch.randn(1000, 1000, device='webgpu')
-
-# GPU-accelerated matrix multiplication
-result = torch.matmul(x, y)
-print(f"Computed on: {result.device}")
-`);
-```
-
-#### **Neural Network Training**
-```javascript
-await greed.run(`
-import torch
-import torch.nn as nn
-
-# Neural network on GPU
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(784, 128)
-        self.relu = nn.ReLU()
-        self.output = nn.Linear(128, 10)
-    
-    def forward(self, x):
-        return self.output(self.relu(self.linear(x)))
-
-# Move model to WebGPU
-model = SimpleNet().to('webgpu')
-optimizer = torch.optim.Adam(model.parameters())
-
-# Training step with GPU acceleration
-def train_step(data, target):
-    output = model(data)
-    loss = torch.nn.functional.cross_entropy(output, target)
-    loss.backward()
-    optimizer.step()
-    return loss.item()
-`);
-```
-
-### Browser Compatibility
-
-| Browser | WebGPU Support | Status |
-|---------|----------------|--------|
-| Chrome 113+ | ✅ Full | Production Ready |
-| Edge 113+ | ✅ Full | Production Ready |  
-| Firefox | 🚧 Flag Required | `dom.webgpu.enabled=true` |
-| Safari | 🚧 Technology Preview | Limited Support |
-
-### Fallback Strategy
-
-When WebGPU is unavailable, Greed.js automatically falls back to:
-
-1. **CPU Numpy Operations** - Full compatibility maintained
-2. **Web Workers** - Parallel processing for large operations  
-3. **Graceful Degradation** - Same API, different execution engine
-
-## Architecture
-
-```
-Python Code → Greed.js → WebGPU Tensor Bridge → WGSL Compute Shaders → GPU
-                ↓                                    ↓
-         Pyodide Runtime                    Pipeline Cache & Optimization
-                ↓                                    ↓
-    Context Preservation ← Memory Manager ← Buffer Management & GC
-```
-
-### Execution Contexts
-1. **WebGPU Engine**: Hardware-accelerated tensor operations using compute shaders  
-2. **CPU Engine**: NumPy-based operations for compatibility and fallback
-3. **Worker Engine**: Multi-threaded parallel processing for large computations
-4. **Tensor Bridge**: Seamless interoperability between JavaScript and Python tensors
-
-## Framework Integration
-
-### React Usage
-
-```jsx
-import React, { useState, useEffect } from 'react';
-
-function PyTorchComponent() {
-  const [greed, setGreed] = useState(null);
-  const [result, setResult] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadGreed = async () => {
-      try {
-        // Import Pyodide first
-        await import('https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js');
-        
-        // Then import Greed
-        const { Greed } = await import('greed.js');
-        
-        const greedInstance = new Greed({ enableWebGPU: true });
-        setGreed(greedInstance);
-        setLoading(false);
-      } catch (error) {
-        console.error('Failed to load Greed:', error);
-        setLoading(false);
-      }
-    };
-
-    loadGreed();
-  }, []);
-
-  const runPython = async () => {
-    if (!greed) return;
-
-    const code = `
-import torch
-x = torch.randn(100, 100).cuda()
-y = torch.randn(100, 100).cuda()
-result = torch.mm(x, y)
-result.mean().item()
-    `;
-
-    const output = await greed.executeCode(code);
-    setResult(JSON.stringify(output, null, 2));
-  };
-
-  if (loading) return <div>Loading PyTorch...</div>;
-
-  return (
-    <div>
-      <h2>PyTorch in React</h2>
-      <button onClick={runPython}>Run PyTorch Code</button>
-      <pre>{result}</pre>
-    </div>
-  );
-}
-```
-
-### Next.js Usage
-
-```jsx
-import dynamic from 'next/dynamic';
-
-// Dynamically import to avoid SSR issues
-const PyTorchRunner = dynamic(() => import('../components/PyTorchRunner'), {
-  ssr: false, // Important: Disable server-side rendering
-  loading: () => <p>Loading PyTorch...</p>
-});
-
-export default function HomePage() {
-  return (
-    <div>
-      <h1>Next.js with PyTorch</h1>
-      <PyTorchRunner />
-    </div>
-  );
-}
-```
-
-### Custom React Hook
-
-```jsx
-import { useState, useEffect } from 'react';
-
-export function useGreed(options = {}) {
-  const [greed, setGreed] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    const initGreed = async () => {
-      try {
-        if (!window.loadPyodide) {
-          await import('https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js');
-        }
-        const { Greed } = await import('greed.js');
-        const instance = new Greed(options);
-        setGreed(instance);
-        setLoading(false);
-      } catch (err) {
-        setError(err);
-        setLoading(false);
-      }
-    };
-
-    initGreed();
-    return () => greed?.destroy();
-  }, []);
-
-  return { greed, loading, error };
-}
-```
-
-**⚠️ Important Notes for React/Next.js:**
-- **Client-Side Only**: Greed.js only works in browsers, not server-side
-- **Next.js**: Use dynamic imports with `ssr: false`
-- **Memory**: Call `greed.destroy()` in cleanup
-- **WebGPU**: Requires modern browsers (Chrome 113+, Edge 113+)
-
-## Examples
-
-### Image Classification with PyTorch
-```python
-import torch
-import torch.nn as nn
-
-# Define a simple CNN
-class ImageClassifier(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, 3)
-        self.relu = nn.ReLU()
-        self.fc = nn.Linear(32, 10)
-    
-    def forward(self, x):
-        x = self.relu(self.conv1(x))
-        x = x.mean(dim=[2, 3])  # Global average pooling
-        return self.fc(x)
-
-# Create model and process batch
-model = ImageClassifier()
-images = torch.randn(8, 3, 32, 32).cuda()  # GPU acceleration
-predictions = model(images)
-```
-
-### Performance Benchmarking
-```python
-import torch
-import time
-
-def benchmark_operation(name, func, *args):
-    torch.cuda.is_available()  # Ensure GPU ready
-    
-    start = time.time()
-    result = func(*args)
-    end = time.time()
-    
-    print(f"{name}: {(end-start)*1000:.2f}ms")
-    return result
-
-# Benchmark GPU vs CPU
-a_gpu = torch.randn(1000, 1000).cuda()
-b_gpu = torch.randn(1000, 1000).cuda()
-
-gpu_result = benchmark_operation("GPU MatMul", torch.mm, a_gpu, b_gpu)
-cpu_result = benchmark_operation("CPU MatMul", torch.mm, a_gpu.cpu(), b_gpu.cpu())
-```
-
-## Browser Support
+## 🌐 Browser Support
 
 | Feature | Chrome | Firefox | Safari | Edge |
 |---------|--------|---------|--------|------|
 | **Pyodide/WebAssembly** | ✅ 57+ | ✅ 52+ | ✅ 11+ | ✅ 16+ |
 | **WebGPU Acceleration** | ✅ 113+ | 🔄 Exp | 🔄 Exp | ✅ 113+ |
 | **Web Workers** | ✅ | ✅ | ✅ | ✅ |
+| **Notebook State Persistence** | ✅ | ✅ | ✅ | ✅ |
 
-## Development
+## 🎨 Framework Integration
+
+### React
+
+```jsx
+import { useState, useEffect } from 'react';
+import Greed from 'greed.js';
+
+function PyTorchNotebook() {
+  const [greed, setGreed] = useState(null);
+  const [output, setOutput] = useState('');
+
+  useEffect(() => {
+    const init = async () => {
+      const instance = new Greed({ enableWebGPU: true });
+      await instance.initialize();
+      setGreed(instance);
+    };
+    init();
+    return () => greed?.destroy();
+  }, []);
+
+  const runCell = async (code) => {
+    if (!greed) return;
+    const result = await greed.run(code);
+    setOutput(result.output);
+  };
+
+  return (
+    <div>
+      <button onClick={() => runCell('a = 5; print(a)')}>
+        Cell 1: Define a
+      </button>
+      <button onClick={() => runCell('print(a * 2)')}>
+        Cell 2: Use a
+      </button>
+      <button onClick={() => greed.clearState()}>
+        Clear State
+      </button>
+      <pre>{output}</pre>
+    </div>
+  );
+}
+```
+
+### Next.js
+
+```jsx
+import dynamic from 'next/dynamic';
+
+// Disable SSR for Greed.js
+const PyTorchRunner = dynamic(() => import('../components/PyTorchRunner'), {
+  ssr: false,
+  loading: () => <p>Loading PyTorch...</p>
+});
+
+export default function HomePage() {
+  return <PyTorchRunner />;
+}
+```
+
+## 🔧 Development
 
 ```bash
 # Clone repository
-git clone https://github.com/your-username/greed.git
+git clone https://github.com/adityakhalkar/greed.git
 cd greed
 
-# Install dependencies  
+# Install dependencies
 npm install
 
-# Start development server with live examples
+# Start development server
 npm run dev
 
 # Build for production
@@ -573,13 +469,21 @@ npm test
 ```
 greed/
 ├── src/
-│   ├── greed.js              # Main library file
-│   └── gpu/
-│       └── webgpu-compute.js # WebGPU compute engine
-├── sandbox.html              # Interactive examples
-├── examples/                 # Usage examples
-├── tests/                    # Test suite
-└── dist/                     # Built files
+│   ├── core/
+│   │   ├── greed-v2.js          # Main orchestrator
+│   │   ├── runtime-manager.js    # Pyodide runtime
+│   │   └── event-emitter.js      # Event system
+│   ├── compute/
+│   │   ├── compute-strategy.js   # Compute orchestration
+│   │   └── webgpu/               # WebGPU implementation
+│   ├── utils/
+│   │   ├── memory-manager.js     # Memory management
+│   │   └── security-validator.js # Security validation
+│   └── polyfills/
+│       └── pytorch-runtime.js    # PyTorch polyfill
+├── dist/                         # Built files
+├── tests/                        # Test suite
+└── examples/                     # Usage examples
 ```
 
 ## 🤝 Contributing
@@ -590,7 +494,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 2. **Feature Requests**: Propose new PyTorch operations or WebGPU optimizations
 3. **Pull Requests**: Include tests and ensure all examples still work
 
-## License
+## 📝 License
 
 This software is dual-licensed under AGPL v3.0 and commercial licenses.
 
@@ -610,7 +514,7 @@ For commercial licensing inquiries, contact khalkaraditya8@gmail.com
 
 Complete licensing terms are available in the [LICENSE](LICENSE) file.
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - **[Pyodide](https://pyodide.org/)**: Python-to-WebAssembly runtime
 - **[WebGPU](https://gpuweb.github.io/gpuweb/)**: GPU acceleration standard
@@ -619,4 +523,4 @@ Complete licensing terms are available in the [LICENSE](LICENSE) file.
 
 ---
 
-**Greed.js** - Bringing the power of PyTorch and GPU acceleration to every web browser! 
+**Greed.js v3.0** - Bringing the power of PyTorch, GPU acceleration, and notebook-style execution to every web browser! 🚀
