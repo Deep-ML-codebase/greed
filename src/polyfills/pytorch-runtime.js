@@ -78,26 +78,19 @@ class WebGPUTensor:
 
         # GPU ACCELERATION: Allocate GPU buffer if on webgpu device
         self._gpu_buffer_id = None
-
-        # Debug: Check each condition
         device_str = str(self.device)
-        print(f"[GPU DEBUG] device={self.device}, device_str={device_str}, is_webgpu={device_str == 'webgpu'}, has_allocate={'__webgpu_allocate__' in globals()}, _internal={_internal}")
 
         if device_str == 'webgpu' and '__webgpu_allocate__' in globals() and not _internal:
             try:
                 # Allocate buffer on GPU for faster operations
-                print(f"[GPU] Calling __webgpu_allocate__ with shape={list(self.shape)}, dtype={self.dtype}")
                 self._gpu_buffer_id = __webgpu_allocate__(
                     self._data.tolist(),  # Convert numpy to Python list for JS
                     list(self.shape),
                     self.dtype
                 )
-                print(f"[GPU] Allocated buffer ID: {self._gpu_buffer_id}")
             except Exception as e:
-                # Log error and fallback to CPU if GPU allocation fails
-                print(f"[GPU] Allocation failed: {str(e)}")
-                import traceback
-                traceback.print_exc()
+                # Fallback to CPU if GPU allocation fails
+                pass
 
     @property
     def data(self):
@@ -193,7 +186,7 @@ class WebGPUTensor:
                     self._data = result_data_flat.reshape(self.shape)
                     self._gpu_only = False  # Data now synced
             except Exception as e:
-                print(f"[GPU] Sync from GPU failed: {str(e)}")
+                pass  # Sync from GPU failed
 
     def numpy(self):
         self._sync_from_gpu()  # Sync if GPU-only
@@ -1428,7 +1421,6 @@ class WebGPUTensor:
 
             except Exception as e:
                 # Fallback to CPU if GPU fails
-                print(f"[GPU] Matmul failed, falling back to CPU: {str(e)}")
                 use_gpu = False
 
         if not use_gpu:
@@ -2657,9 +2649,8 @@ class TorchNNModule:
                             list(param.shape),
                             param.dtype
                         )
-                        print(f"[GPU] Allocated buffer for param shape {param.shape}: ID={param._gpu_buffer_id}")
                     except Exception as e:
-                        print(f"[GPU] Failed to allocate buffer: {str(e)}")
+                        pass  # Failed to allocate GPU buffer
             else:
                 param.device = target_device
 
@@ -2843,7 +2834,6 @@ class TorchNNLinear(TorchNNModule):
                         list(weight_t_data.shape),
                         self.weight.dtype
                     )
-                    print(f"[GPU] Cached W^T for Linear layer: buffer_id={self._weight_t_gpu_buffer_id}")
 
                 # Create temporary WebGPUTensor for transposed weight
                 weight_t = WebGPUTensor(self._weight_t_data, device="webgpu", dtype=self.weight.dtype, _internal=True)
