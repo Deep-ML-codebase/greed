@@ -1,39 +1,45 @@
 ![logo](greed.png)
 
-# Greed.js v3.0
+# Greed.js v3.1
 
 [![npm version](https://badge.fury.io/js/greed.js.svg)](https://badge.fury.io/js/greed.js)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/adityakhalkar/greed/workflows/CI/badge.svg)](https://github.com/adityakhalkar/greed/actions)
 
-A powerful JavaScript library that enables seamless execution of Python code in web browsers with **actual WebGPU-accelerated PyTorch support** using compute shaders and intelligent worker-based parallel execution.
+A high-performance JavaScript library enabling seamless execution of Python code in web browsers with WebGPU-accelerated PyTorch support using compute shaders and intelligent worker-based parallel execution.
 
-## 🎉 What's New in v3.0
+## What's New in v3.1
 
-### 🔧 Modular Architecture Rewrite
+### GPU Acceleration Performance
+- **Optimized WebGPU matmul shader**: Tiled matrix multiplication with shared memory
+- **Cached transpose optimization**: Eliminates redundant GPU uploads in neural network layers
+- **Intelligent device management**: Automatic GPU buffer allocation and lifecycle management
+- **Performance gains**: Up to 8.8x speedup on browser-appropriate workloads
+
+### Modular Architecture Rewrite
 - **Component-based design**: Separated concerns across RuntimeManager, ComputeStrategy, MemoryManager, and SecurityValidator
 - **EventEmitter system**: Clean inter-component communication
 - **Better maintainability**: Each module has a single responsibility
 - **Improved testability**: Components can be tested in isolation
 
-### 📔 Notebook-Style State Persistence
+### Notebook-Style State Persistence
 - **Variables persist between cells**: Define `a = 1` in one cell, use it in the next
 - **Session-based execution**: Python globals maintained across multiple `run()` calls
 - **Explicit cleanup API**: New `clearState()` method for manual state reset
 - **Smart memory management**: Cleanup on errors, preserve on success
 
-### 🛡️ Enhanced Security & Stability
+### Enhanced Security & Stability
 - **Comprehensive input validation**: Advanced threat detection system
 - **Graceful error recovery**: Automatic state cleanup after errors
 - **Production-ready**: Extensive testing and validation
 
-### 📊 Better Developer Experience
+### Better Developer Experience
 - **Dual API**: Use `run()` or `runPython()` - both work identically
 - **Comprehensive events**: Monitor initialization, operations, errors, and cleanup
 - **Detailed statistics**: Memory usage, operation count, performance metrics
 - **Better error messages**: Clear, actionable error information
 
-## 📦 Installation
+## Installation
 
 ```bash
 npm install greed.js
@@ -46,26 +52,26 @@ yarn add greed.js
 ```html
 <!-- CDN -->
 <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
-<script src="https://unpkg.com/greed.js@3.0.0/dist/greed.min.js"></script>
+<script src="https://unpkg.com/greed.js@3.1.0/dist/greed.min.js"></script>
 ```
 
-## ✨ Features
+## Features
 
-- **🏗️ Modular Architecture**: Clean separation of concerns with EventEmitter-based communication
-- **📔 Notebook-Style Execution**: Variables persist between cells like Jupyter notebooks
+- **Modular Architecture**: Clean separation of concerns with EventEmitter-based communication
+- **Notebook-Style Execution**: Variables persist between cells like Jupyter notebooks
 - **PyTorch in Browser**: Full PyTorch polyfill with neural networks, tensors, and deep learning operations
-- **⚡ WebGPU Compute Shaders**: True GPU acceleration with 50+ optimized WGSL compute shaders for tensor operations
-- **🎯 Intelligent Fallback**: WebGPU → CPU → Worker execution strategy with automatic optimization
+- **WebGPU Compute Shaders**: True GPU acceleration with 50+ optimized WGSL compute shaders for tensor operations
+- **Intelligent Fallback**: WebGPU → CPU → Worker execution strategy with automatic optimization
 - **Complete Neural Networks**: Support for `torch.nn.Module`, layers, loss functions, and training
 - **Python in Browser**: Execute Python code directly using Pyodide/WebAssembly
-- **🛡️ Enhanced Security**: Advanced input validation and threat detection system
-- **🧠 Smart Compute Strategy**: Intelligent fallback between WebGPU → CPU → Worker execution
-- **📊 Memory Management**: Automatic resource cleanup and memory pressure monitoring
+- **Enhanced Security**: Advanced input validation and threat detection system
+- **Smart Compute Strategy**: Intelligent fallback between WebGPU → CPU → Worker execution
+- **Memory Management**: Automatic resource cleanup and memory pressure monitoring
 - **Dynamic Package Installation**: Automatically install Python packages on-demand
 - **Simple API**: Easy-to-use interface with comprehensive PyTorch compatibility
-- **📈 Production Ready**: Comprehensive testing, security validation, and performance optimization
+- **Production Ready**: Comprehensive testing, security validation, and performance optimization
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Basic Usage
 
@@ -73,10 +79,10 @@ yarn add greed.js
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Greed.js v3.0 Demo</title>
+    <title>Greed.js v3.1 Demo</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
     <script type="module">
-        import Greed from 'https://unpkg.com/greed.js@3.0.0/dist/greed.js';
+        import Greed from 'https://unpkg.com/greed.js@3.1.0/dist/greed.js';
 
         async function main() {
             // Initialize Greed.js
@@ -121,14 +127,14 @@ yarn add greed.js
     </script>
 </head>
 <body>
-    <h1>Greed.js v3.0 - Notebook-Style Execution</h1>
+    <h1>Greed.js v3.1 - Notebook-Style Execution</h1>
 </body>
 </html>
 ```
 
-## 🏗️ Architecture v3.0
+## Architecture v3.1
 
-Greed.js v3.0 features a modular architecture designed for performance, maintainability, and extensibility:
+Greed.js v3.1 features a modular architecture designed for performance, maintainability, and extensibility:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -163,9 +169,9 @@ Greed.js v3.0 features a modular architecture designed for performance, maintain
 - **`SecurityValidator`**: Comprehensive input validation and threat detection
 - **`EventEmitter`**: Base class providing event-driven inter-component communication
 
-## 📔 Notebook-Style Execution
+## Notebook-Style Execution
 
-v3.0 introduces true notebook-style execution where Python variables persist between cells:
+v3.1 introduces true notebook-style execution where Python variables persist between cells:
 
 ```javascript
 const greed = new Greed();
@@ -210,7 +216,7 @@ await greed.run(`
 await greed.clearState();
 ```
 
-## 🎯 API Reference
+## API Reference
 
 ### Constructor
 
@@ -322,7 +328,7 @@ greed.on('memory:warning', (data) => {
 });
 ```
 
-## 🔥 PyTorch Support
+## PyTorch Support
 
 ### Tensor Operations
 ```python
@@ -374,16 +380,16 @@ loss = criterion(output, target)
 - **Neural network layers**: `nn.Linear`, `nn.ReLU`, `nn.CrossEntropyLoss`
 - **Automatic fallback**: Seamless CPU fallback for small tensors or when WebGPU unavailable
 
-## 🌐 Browser Support
+## Browser Support
 
 | Feature | Chrome | Firefox | Safari | Edge |
 |---------|--------|---------|--------|------|
-| **Pyodide/WebAssembly** | ✅ 57+ | ✅ 52+ | ✅ 11+ | ✅ 16+ |
-| **WebGPU Acceleration** | ✅ 113+ | 🔄 Exp | 🔄 Exp | ✅ 113+ |
-| **Web Workers** | ✅ | ✅ | ✅ | ✅ |
-| **Notebook State Persistence** | ✅ | ✅ | ✅ | ✅ |
+| **Pyodide/WebAssembly** | 57+ | 52+ | 11+ | 16+ |
+| **WebGPU Acceleration** | 113+ | Experimental | Experimental | 113+ |
+| **Web Workers** | Yes | Yes | Yes | Yes |
+| **Notebook State Persistence** | Yes | Yes | Yes | Yes |
 
-## 🎨 Framework Integration
+## Framework Integration
 
 ### React
 
@@ -444,7 +450,7 @@ export default function HomePage() {
 }
 ```
 
-## 🔧 Development
+## Development
 
 ```bash
 # Clone repository
@@ -464,7 +470,7 @@ npm run build
 npm test
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 greed/
@@ -486,7 +492,7 @@ greed/
 └── examples/                     # Usage examples
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
@@ -494,7 +500,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 2. **Feature Requests**: Propose new PyTorch operations or WebGPU optimizations
 3. **Pull Requests**: Include tests and ensure all examples still work
 
-## 📝 License
+## License
 
 This software is dual-licensed under AGPL v3.0 and commercial licenses.
 
@@ -514,7 +520,7 @@ For commercial licensing inquiries, contact khalkaraditya8@gmail.com
 
 Complete licensing terms are available in the [LICENSE](LICENSE) file.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **[Pyodide](https://pyodide.org/)**: Python-to-WebAssembly runtime
 - **[WebGPU](https://gpuweb.github.io/gpuweb/)**: GPU acceleration standard
@@ -523,4 +529,4 @@ Complete licensing terms are available in the [LICENSE](LICENSE) file.
 
 ---
 
-**Greed.js v3.0** - Bringing the power of PyTorch, GPU acceleration, and notebook-style execution to every web browser! 🚀
+**Greed.js v3.1** - Bringing the power of PyTorch, GPU acceleration, and notebook-style execution to every web browser.
