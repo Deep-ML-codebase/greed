@@ -1,45 +1,33 @@
 ![logo](greed.png)
 
+> **Greed** is one of the seven deadly sins. It represents an insatiable desire for more—more power, more performance, more capability. In machine learning, we embody this philosophy: never settling for limitations, always pushing boundaries, constantly wanting more from our tools.
+
 # Greed.js v3.1
+
+**High-performance PyTorch execution in browsers with WebGPU acceleration**
+
+Greed.js brings the complete PyTorch ecosystem to web browsers with native GPU acceleration. Write pure Python code, leverage WebGPU compute shaders, and deploy machine learning models without servers or installations.
 
 [![npm version](https://badge.fury.io/js/greed.js.svg)](https://badge.fury.io/js/greed.js)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://github.com/adityakhalkar/greed/workflows/CI/badge.svg)](https://github.com/adityakhalkar/greed/actions)
 
-A high-performance JavaScript library enabling seamless execution of Python code in web browsers with WebGPU-accelerated PyTorch support using compute shaders and intelligent worker-based parallel execution.
+## What is GreedJS?
 
-## What's New in v3.1
+GreedJS enables you to **write pure Python PyTorch code that runs in browsers with WebGPU acceleration**. Unlike traditional JavaScript ML libraries, GreedJS acts like Pyodide - you write Python, and every PyTorch operation executes as optimized WebGPU compute shaders for true GPU performance.
 
-### GPU Acceleration Performance
-- **Optimized WebGPU matmul shader**: Tiled matrix multiplication with shared memory
-- **Cached transpose optimization**: Eliminates redundant GPU uploads in neural network layers
-- **Intelligent device management**: Automatic GPU buffer allocation and lifecycle management
-- **Performance gains**: Up to 8.8x speedup on browser-appropriate workloads
+## Key Features
 
-### Modular Architecture Rewrite
-- **Component-based design**: Separated concerns across RuntimeManager, ComputeStrategy, MemoryManager, and SecurityValidator
-- **EventEmitter system**: Clean inter-component communication
-- **Better maintainability**: Each module has a single responsibility
-- **Improved testability**: Components can be tested in isolation
+- **Pure Python PyTorch**: Write standard Python code - `import torch; x = torch.tensor([1,2,3])`
+- **WebGPU Compute Shaders**: Every PyTorch operation runs as optimized GPU compute shaders
+- **Python-First Architecture**: GreedJS handles WebGPU bridging transparently
+- **Complete ML Pipeline**: Full PyTorch ecosystem - tensors, nn.Module, optimizers, data loaders
+- **Browser Native**: Runs entirely client-side with Pyodide integration
+- **Production Ready**: Memory management, error handling, performance optimization
+- **Optimized Bundle**: 271KB with intelligent Python↔WebGPU bridging
+## Quick Start
 
-### Notebook-Style State Persistence
-- **Variables persist between cells**: Define `a = 1` in one cell, use it in the next
-- **Session-based execution**: Python globals maintained across multiple `run()` calls
-- **Explicit cleanup API**: New `clearState()` method for manual state reset
-- **Smart memory management**: Cleanup on errors, preserve on success
-
-### Enhanced Security & Stability
-- **Comprehensive input validation**: Advanced threat detection system
-- **Graceful error recovery**: Automatic state cleanup after errors
-- **Production-ready**: Extensive testing and validation
-
-### Better Developer Experience
-- **Dual API**: Use `run()` or `runPython()` - both work identically
-- **Comprehensive events**: Monitor initialization, operations, errors, and cleanup
-- **Detailed statistics**: Memory usage, operation count, performance metrics
-- **Better error messages**: Clear, actionable error information
-
-## Installation
+### Installation
 
 ```bash
 npm install greed.js

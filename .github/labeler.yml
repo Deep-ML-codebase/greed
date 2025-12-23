@@ -1,0 +1,42 @@
+# Auto-labeler configuration for pull requests
+
+# Documentation
+documentation:
+  - changed-files:
+    - any-glob-to-any-file: ['**/*.md', 'docs/**/*']
+
+# Tests
+testing:
+  - changed-files:
+    - any-glob-to-any-file: ['tests/**/*', '**/*.test.js', '**/*.spec.js']
+
+# Source code
+core:
+  - changed-files:
+    - any-glob-to-any-file: ['src/core/**/*']
+
+webgpu:
+  - changed-files:
+    - any-glob-to-any-file: ['src/compute/webgpu/**/*', 'src/compute/webgpu/webgpu-shaders.js']
+
+pytorch:
+  - changed-files:
+    - any-glob-to-any-file: ['src/polyfills/pytorch-runtime.js']
+
+shader:
+  - changed-files:
+    - any-glob-to-any-file: ['**/*shader*.js', '**/*.wgsl']
+
+# Build and tooling
+build:
+  - changed-files:
+    - any-glob-to-any-file: ['webpack.config.js', 'package.json', '.github/workflows/**/*']
+
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file: ['package.json', 'package-lock.json']
+
+# GitHub specific
+github-actions:
+  - changed-files:
+    - any-glob-to-any-file: ['.github/workflows/**/*']

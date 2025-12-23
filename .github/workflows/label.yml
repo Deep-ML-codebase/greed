@@ -1,0 +1,59 @@
+name: Auto Label
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Auto-label PRs
+      uses: actions/labeler@v5
+      if: github.event_name == 'pull_request'
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        configuration-path: .github/labeler.yml
+
+    - name: Label based on title
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const title = (context.payload.pull_request || context.payload.issue).title.toLowerCase();
+          const labels = [];
+
+          // Type labels
+          if (title.includes('fix') || title.includes('bug')) labels.push('bug');
+          if (title.includes('feat') || title.includes('feature')) labels.push('enhancement');
+          if (title.includes('perf') || title.includes('performance')) labels.push('performance');
+          if (title.includes('docs') || title.includes('documentation')) labels.push('documentation');
+          if (title.includes('test')) labels.push('testing');
+          if (title.includes('refactor')) labels.push('refactoring');
+
+          // Component labels
+          if (title.includes('webgpu') || title.includes('gpu')) labels.push('webgpu');
+          if (title.includes('pytorch') || title.includes('torch')) labels.push('pytorch');
+          if (title.includes('shader') || title.includes('wgsl')) labels.push('shader');
+          if (title.includes('api')) labels.push('api');
+          if (title.includes('browser')) labels.push('browser-compatibility');
+
+          if (labels.length > 0) {
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = (context.payload.pull_request || context.payload.issue).number;
+
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number,
+              labels
+            });
+          }
