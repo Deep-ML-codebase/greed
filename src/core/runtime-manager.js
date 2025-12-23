@@ -272,6 +272,7 @@ class RuntimeManager extends EventEmitter {
             });
           });
         } else {
+          // No matplotlib available
         }
 
         // Enhanced stdout capture with streaming support

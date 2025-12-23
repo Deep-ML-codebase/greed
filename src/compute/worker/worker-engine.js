@@ -167,7 +167,7 @@ class WorkerEngine extends EventEmitter {
       this.emit('cleanup:start');
       
       // Cancel pending tasks
-      for (const [taskId, task] of this.pendingTasks.entries()) {
+      for (const [_taskId, task] of this.pendingTasks.entries()) {
         clearTimeout(task.timeout);
         task.reject(new Error('Worker engine shutting down'));
       }

@@ -330,7 +330,7 @@ class BufferManager extends EventEmitter {
       let destroyed = 0;
       
       // Immediately destroy all pooled buffers
-      for (const [poolKey, buffers] of this.pools.entries()) {
+      for (const [buffers] of this.pools.entries()) {
         while (buffers.length > 0) {
           const buffer = buffers.pop();
           try {
