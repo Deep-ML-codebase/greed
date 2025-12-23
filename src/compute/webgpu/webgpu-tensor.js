@@ -362,7 +362,7 @@ export class WebGPUTensor {
     return this;
   }
   
-  backward(gradient = null, retain_graph = false, create_graph = false) {
+  backward(gradient = null, _retain_graph = false, _create_graph = false) {
     if (!this.requires_grad) {
       return;
     }
@@ -564,13 +564,13 @@ export class WebGPUTensor {
       relu: (a) => a.map(val => Math.max(0, val)),
       sigmoid: (a) => a.map(val => 1 / (1 + Math.exp(-val))),
       tanh: (a) => a.map(val => Math.tanh(val)),
-      softmax: (a, options = {}) => {
+      softmax: (a, _options = {}) => {
         const max = Math.max(...a);
         const exps = a.map(val => Math.exp(val - max));
         const sum = exps.reduce((acc, val) => acc + val, 0);
         return exps.map(val => val / sum);
       },
-      log_softmax: (a, options = {}) => {
+      log_softmax: (a, _options = {}) => {
         const max = Math.max(...a);
         const exps = a.map(val => Math.exp(val - max));
         const sum = exps.reduce((acc, val) => acc + val, 0);

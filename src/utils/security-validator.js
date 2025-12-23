@@ -102,7 +102,7 @@ class SecurityValidator extends EventEmitter {
   /**
    * Validate tensor data for security and resource constraints
    */
-  validateTensorData(tensors, options = {}) {
+  validateTensorData(tensors, _options = {}) {
     const tensorArray = Array.isArray(tensors) ? tensors : [tensors];
     
     this.emit('tensor:validation:start', { tensorCount: tensorArray.length });
@@ -311,8 +311,9 @@ class SecurityValidator extends EventEmitter {
     if (code.length > this.config.maxCodeLength) {
       throw new SecurityError(`Code too long: ${code.length} > ${this.config.maxCodeLength}`);
     }
-    
+
     // Check for null bytes and control characters
+    // eslint-disable-next-line no-control-regex
     if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(code)) {
       throw new SecurityError('Code contains invalid control characters');
     }

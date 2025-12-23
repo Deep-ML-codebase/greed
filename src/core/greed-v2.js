@@ -580,7 +580,7 @@ except ImportError:
     _polyfill_installed = False
 `, { captureOutput: true });
 
-      const isAlreadyInstalled = checkResult.output && checkResult.output.includes("already installed");
+      const isAlreadyInstalled = checkResult.output && checkResult.output.includes('already installed');
 
       if (!isAlreadyInstalled) {
         // Install PyTorch polyfill in Python runtime using extracted module

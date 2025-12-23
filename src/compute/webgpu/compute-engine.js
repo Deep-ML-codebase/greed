@@ -366,7 +366,7 @@ class WebGPUComputeEngine extends EventEmitter {
   }
 
   // Private methods
-  _validateOperation(operation, tensors, options) {
+  _validateOperation(operation, tensors, _options) {
     if (!operation || typeof operation !== 'string') {
       throw new Error('Operation must be a non-empty string');
     }
@@ -439,7 +439,7 @@ class WebGPUComputeEngine extends EventEmitter {
     return buffers;
   }
 
-  _createBindGroup(pipeline, buffers, options) {
+  _createBindGroup(pipeline, buffers, _options) {
     const entries = [];
 
     // Add input buffers
@@ -658,7 +658,7 @@ class WebGPUComputeEngine extends EventEmitter {
   /**
    * Wait for GPU completion with timeout protection
    */
-  async _waitForGPUCompletion(timeoutMs = 5000) {
+  async _waitForGPUCompletion(_timeoutMs = 5000) {
 
     // WORKAROUND: onSubmittedWorkDone() hangs in some browsers
     // Instead of waiting, we'll use a shorter timeout and assume completion

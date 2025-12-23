@@ -140,7 +140,7 @@ _memory_optimized = True
 // Worker global state
 let pyodide = null;
 let isInitialized = false;
-let installedPackages = new Set();
+const installedPackages = new Set();
 let initializationPromise = null;
 let contextManager = null;
 
@@ -272,7 +272,7 @@ async function executePython(taskId, code, options = {}) {
   const {
     captureOutput = false,
     globals = {},
-    validateInput = true
+    _validateInput = true
   } = options;
 
   const startTime = performance.now();

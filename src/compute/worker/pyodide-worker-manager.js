@@ -526,14 +526,14 @@ class PyodideWorkerManager extends EventEmitter {
   async terminate() {
     if (this.worker) {
       // Reject all pending messages
-      for (const [id, pending] of this.pendingMessages) {
+      for (const [_id, pending] of this.pendingMessages) {
         clearTimeout(pending.timeout);
         pending.reject(new Error('Worker terminated'));
       }
       this.pendingMessages.clear();
 
       // Reject all execution tasks
-      for (const [taskId, task] of this.executionTasks) {
+      for (const [_taskId, task] of this.executionTasks) {
         task.reject(new Error('Worker terminated'));
       }
       this.executionTasks.clear();

@@ -1541,7 +1541,7 @@ export class WebGPUShaders {
 
     if (isDebugEnabled) {
       if (Array.isArray(tensors)) {
-        tensors.forEach((tensor, i) => {
+        tensors.forEach((_tensor, _i) => {
         });
       }
     }
@@ -1555,6 +1555,7 @@ export class WebGPUShaders {
         params[3] = 0; // reserved
 
         if (isDebugEnabled) {
+          // Debug logging placeholder
         }
         break;
       
@@ -1569,7 +1570,7 @@ export class WebGPUShaders {
       case 'conv2d':
         // params: [batch, in_ch, in_h, in_w, out_ch, out_h, out_w, kernel]
         const inShape = tensors[0].shape || [1, 1, 28, 28];
-        const weightShape = tensors[1].shape || [32, 1, 3, 3];
+        const _weightShape = tensors[1].shape || [32, 1, 3, 3];
         params[0] = inShape[0]; // batch
         params[1] = inShape[1]; // in_channels
         params[2] = inShape[2]; // in_height
@@ -1619,8 +1620,9 @@ export class WebGPUShaders {
         params[3] = 0;
         break;
     }
-    
+
     if (isDebugEnabled) {
+      // Debug logging placeholder
     }
 
     return params;

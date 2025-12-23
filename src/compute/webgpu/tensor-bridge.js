@@ -136,7 +136,7 @@ export class TensorBridge {
   /**
    * Direct matmul execution that bypasses the problematic async/sync wrapper
    */
-  _executeMatmulDirectSync(tensorId, otherTensorId, options = {}) {
+  _executeMatmulDirectSync(tensorId, otherTensorId, _options = {}) {
 
     try {
       const tensor = this.tensorRegistry.get(tensorId);
@@ -187,7 +187,7 @@ export class TensorBridge {
     }
   }
 
-  async _executeMatmulDirect(tensorId, otherTensorId, options = {}) {
+  async _executeMatmulDirect(tensorId, otherTensorId, _options = {}) {
 
     try {
       const tensor = this.tensorRegistry.get(tensorId);
@@ -224,7 +224,7 @@ export class TensorBridge {
       const resultInfo = this.createWebGPUTensor(
         resultData,
         resultShape,
-        result.dtype || 'float32',
+        computeResult.dtype || 'float32',
         'webgpu'
       );
 
@@ -234,7 +234,7 @@ export class TensorBridge {
         result: resultInfo,
         data: Array.from(resultData),
         shape: resultShape,
-        dtype: result.dtype || 'float32'
+        dtype: computeResult.dtype || 'float32'
       };
     } catch (error) {
       return { success: false, error: error.message };
@@ -347,7 +347,7 @@ export class TensorBridge {
         });
 
       // Use a timeout wrapper
-      const timeoutPromise = new Promise((_, reject) => {
+      const _timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
           reject(new Error('WebGPU operation timeout (15s)'));
         }, 15000);
